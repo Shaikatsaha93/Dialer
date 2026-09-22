@@ -58,6 +58,14 @@
             android:name=".service.SipForegroundService"
             android:foregroundServiceType="phoneCall|microphone"
             android:exported="false" />
+
+        <service
+            android:name=".service.SoftphoneFirebaseMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>

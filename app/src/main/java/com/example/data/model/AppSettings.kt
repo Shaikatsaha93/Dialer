@@ -27,6 +27,10 @@ data class AppSettings(
     val wakeLockEnabled: Boolean = true,
     val showOnLockScreen: Boolean = true,
 
+    // Firebase Cloud Messaging (FCM)
+    val fcmPushEnabled: Boolean = true,
+    val fcmVoipWakeup: Boolean = true,
+
     // Diagnostics & History
     val recordCallHistory: Boolean = true,
     val detailedDebugLogging: Boolean = true,

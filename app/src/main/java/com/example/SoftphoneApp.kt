@@ -5,6 +5,7 @@ import android.util.Log
 import com.example.data.local.AppDatabase
 import com.example.data.model.CallType
 import com.example.data.repository.CallLogRepository
+import com.example.data.repository.FcmTokenManager
 import com.example.data.repository.SettingsRepository
 import com.example.data.repository.SipAccountRepository
 import com.example.service.SipForegroundService
@@ -34,6 +35,8 @@ class SoftphoneApp : Application() {
         private set
     lateinit var telecomHelper: TelecomHelper
         private set
+    lateinit var fcmTokenManager: FcmTokenManager
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -43,11 +46,13 @@ class SoftphoneApp : Application() {
         accountRepository = SipAccountRepository(database.sipAccountDao())
         callLogRepository = CallLogRepository(database.callLogDao())
         settingsRepository = SettingsRepository(this)
+        fcmTokenManager = FcmTokenManager(this)
         sipManager = LinphoneSipManager(this)
         telecomHelper = TelecomHelper(this)
 
         telecomHelper.registerPhoneAccount()
         sipManager.initializeSdk()
+        fcmTokenManager.initialize()
 
         observeActiveAccount()
         observeCallEvents()

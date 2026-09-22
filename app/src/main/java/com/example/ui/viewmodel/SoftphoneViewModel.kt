@@ -10,9 +10,11 @@ import com.example.data.model.AppThemeMode
 import com.example.data.model.CallLogEntry
 import com.example.data.model.CallState
 import com.example.data.model.CallType
+import com.example.data.model.PushMessageItem
 import com.example.data.model.RegistrationStatus
 import com.example.data.model.SipAccount
 import com.example.data.repository.CallLogRepository
+import com.example.data.repository.FcmTokenManager
 import com.example.data.repository.SettingsRepository
 import com.example.data.repository.SipAccountRepository
 import com.example.sip.SipManager
@@ -29,10 +31,45 @@ class SoftphoneViewModel(
     private val sipManager: SipManager = SoftphoneApp.instance.sipManager,
     private val accountRepository: SipAccountRepository = SoftphoneApp.instance.accountRepository,
     private val callLogRepository: CallLogRepository = SoftphoneApp.instance.callLogRepository,
-    private val settingsRepository: SettingsRepository = SoftphoneApp.instance.settingsRepository
+    private val settingsRepository: SettingsRepository = SoftphoneApp.instance.settingsRepository,
+    private val fcmTokenManager: FcmTokenManager = SoftphoneApp.instance.fcmTokenManager
 ) : ViewModel() {
 
     val settings: StateFlow<AppSettings> = settingsRepository.settings
+
+    val fcmToken: StateFlow<String?> = fcmTokenManager.fcmToken
+    val fcmTokenStatus: StateFlow<String> = fcmTokenManager.tokenStatus
+    val receivedPushes: StateFlow<List<PushMessageItem>> = fcmTokenManager.receivedPushes
+
+    fun refreshFcmToken() {
+        fcmTokenManager.refreshToken()
+    }
+
+    fun clearPushHistory() {
+        fcmTokenManager.clearPushHistory()
+    }
+
+    fun simulatePushNotification(
+        title: String,
+        body: String,
+        isVoipCall: Boolean = false,
+        callerUri: String = "sip:1003@sip.domain.com",
+        callerName: String = "Bob Johnson"
+    ) {
+        val pushItem = PushMessageItem(
+            title = title,
+            body = body,
+            isVoipCallPush = isVoipCall,
+            callerUri = if (isVoipCall) callerUri else null,
+            callerName = if (isVoipCall) callerName else null,
+            dataPayload = mapOf("type" to if (isVoipCall) "call" else "alert", "caller_uri" to callerUri, "caller_name" to callerName)
+        )
+        fcmTokenManager.recordPushMessage(pushItem)
+        sipManager.addDiagnosticLog("[FCM Test Push] Simulating push: $title - $body (isVoip=$isVoipCall)")
+        if (isVoipCall && settings.value.fcmVoipWakeup) {
+            sipManager.simulateIncomingCall(callerUri, callerName)
+        }
+    }
 
     val themeMode: StateFlow<AppThemeMode> = settings
         .map { it.themeMode }

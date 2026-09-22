@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.NetworkCheck
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PhoneCallback
 import androidx.compose.material.icons.filled.PhoneInTalk
 import androidx.compose.material.icons.filled.Power
@@ -290,7 +291,28 @@ fun VoipSettingsSection(
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f))
 
-            // Section 6: History & Logging
+            // Section 6: Firebase Cloud Messaging (FCM)
+            SettingsCategoryHeader(title = "Push Notifications (FCM)", icon = Icons.Default.Notifications)
+
+            SettingToggleItem(
+                title = "FCM Background Push",
+                description = "Receive SIP notifications and keep device alert even when app is closed",
+                checked = settings.fcmPushEnabled,
+                testTag = "setting_fcm_push_enabled",
+                onCheckedChange = { onSettingsChanged(settings.copy(fcmPushEnabled = it)) }
+            )
+
+            SettingToggleItem(
+                title = "VoIP Push Wake-up",
+                description = "Instantly ring and display incoming call screen upon receiving VoIP push notification",
+                checked = settings.fcmVoipWakeup,
+                testTag = "setting_fcm_voip_wakeup",
+                onCheckedChange = { onSettingsChanged(settings.copy(fcmVoipWakeup = it)) }
+            )
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f))
+
+            // Section 7: History & Logging
             SettingsCategoryHeader(title = "History & Logging", icon = Icons.Default.Settings)
 
             SettingToggleItem(

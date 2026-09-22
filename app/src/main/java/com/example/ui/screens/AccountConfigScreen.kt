@@ -76,6 +76,7 @@ import com.example.data.model.RegistrationStatus
 import com.example.data.model.SipAccount
 import com.example.data.model.SipTransport
 import com.example.ui.components.AccountCard
+import com.example.ui.components.FcmPushSection
 import com.example.ui.components.ThemeModeSelector
 import com.example.ui.components.VoipSettingsSection
 import com.example.ui.theme.CallActionGreen
@@ -95,6 +96,9 @@ fun AccountConfigScreen(
     val diagnosticLogs by viewModel.diagnosticLogs.collectAsStateWithLifecycle()
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val fcmToken by viewModel.fcmToken.collectAsStateWithLifecycle()
+    val fcmTokenStatus by viewModel.fcmTokenStatus.collectAsStateWithLifecycle()
+    val receivedPushes by viewModel.receivedPushes.collectAsStateWithLifecycle()
     val clipboardManager = LocalClipboardManager.current
     var showDiagnostics by remember { mutableStateOf(false) }
 
@@ -228,6 +232,19 @@ fun AccountConfigScreen(
                         settings = settings,
                         onSettingsChanged = { viewModel.updateSettings(it) }
                     )
+
+                    FcmPushSection(
+                        fcmToken = fcmToken,
+                        tokenStatus = fcmTokenStatus,
+                        receivedPushes = receivedPushes,
+                        settings = settings,
+                        onSettingsChanged = { viewModel.updateSettings(it) },
+                        onRefreshToken = { viewModel.refreshFcmToken() },
+                        onClearPushHistory = { viewModel.clearPushHistory() },
+                        onSimulatePush = { title, body, isVoip, callerUri, callerName ->
+                            viewModel.simulatePushNotification(title, body, isVoip, callerUri, callerName)
+                        }
+                    )
                 }
             }
         } else {
@@ -328,6 +345,19 @@ fun AccountConfigScreen(
                 VoipSettingsSection(
                     settings = settings,
                     onSettingsChanged = { viewModel.updateSettings(it) }
+                )
+
+                FcmPushSection(
+                    fcmToken = fcmToken,
+                    tokenStatus = fcmTokenStatus,
+                    receivedPushes = receivedPushes,
+                    settings = settings,
+                    onSettingsChanged = { viewModel.updateSettings(it) },
+                    onRefreshToken = { viewModel.refreshFcmToken() },
+                    onClearPushHistory = { viewModel.clearPushHistory() },
+                    onSimulatePush = { title, body, isVoip, callerUri, callerName ->
+                        viewModel.simulatePushNotification(title, body, isVoip, callerUri, callerName)
+                    }
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))

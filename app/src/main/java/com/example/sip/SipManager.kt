@@ -69,6 +69,8 @@ interface SipManager {
     fun removeParticipantFromConference(participantId: String)
     fun toggleParticipantMute(participantId: String)
     fun swapActiveAndHeldCalls()
+
+    fun addDiagnosticLog(log: String)
 }
 
 sealed class CallEvent {
@@ -99,6 +101,10 @@ class LinphoneSipManager(
 
     override fun clearLogs() {
         _diagnosticLogs.value = emptyList()
+    }
+
+    override fun addDiagnosticLog(log: String) {
+        _diagnosticLogs.value = (_diagnosticLogs.value + log).takeLast(60)
     }
 
     private val _callState = MutableStateFlow<CallState>(CallState.Idle)

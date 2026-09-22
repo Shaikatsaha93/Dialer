@@ -28,6 +28,11 @@ class SettingsRepository(context: Context) {
             stunEnabled = prefs.getBoolean("stun_enabled", false),
             stunServer = prefs.getString("stun_server", "stun.l.google.com:19302") ?: "stun.l.google.com:19302",
             ipv6Enabled = prefs.getBoolean("ipv6_enabled", false),
+            backgroundKeepAlive = prefs.getBoolean("background_keep_alive", true),
+            wakeLockEnabled = prefs.getBoolean("wake_lock_enabled", true),
+            showOnLockScreen = prefs.getBoolean("show_on_lock_screen", true),
+            fcmPushEnabled = prefs.getBoolean("fcm_push_enabled", true),
+            fcmVoipWakeup = prefs.getBoolean("fcm_voip_wakeup", true),
             recordCallHistory = prefs.getBoolean("record_call_history", true),
             detailedDebugLogging = prefs.getBoolean("detailed_debug_logging", true),
             themeMode = try {
@@ -54,6 +59,11 @@ class SettingsRepository(context: Context) {
             .putBoolean("stun_enabled", newSettings.stunEnabled)
             .putString("stun_server", newSettings.stunServer)
             .putBoolean("ipv6_enabled", newSettings.ipv6Enabled)
+            .putBoolean("background_keep_alive", newSettings.backgroundKeepAlive)
+            .putBoolean("wake_lock_enabled", newSettings.wakeLockEnabled)
+            .putBoolean("show_on_lock_screen", newSettings.showOnLockScreen)
+            .putBoolean("fcm_push_enabled", newSettings.fcmPushEnabled)
+            .putBoolean("fcm_voip_wakeup", newSettings.fcmVoipWakeup)
             .putBoolean("record_call_history", newSettings.recordCallHistory)
             .putBoolean("detailed_debug_logging", newSettings.detailedDebugLogging)
             .putString("theme_mode", newSettings.themeMode.name)
