@@ -34,24 +34,12 @@ class MainActivity : ComponentActivity() {
             val settings by viewModel.settings.collectAsStateWithLifecycle()
 
             // Keep screen on during active or incoming call if configured
-            LaunchedEffect(callState) {
-                when (callState) {
-                    is CallState.Incoming -> {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-                            setShowWhenLocked(true)
-                            setTurnScreenOn(true)
-                        }
-                        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                    }
-                    is CallState.Connected, is CallState.Outgoing -> {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-                            setShowWhenLocked(true)
-                        }
-                        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                    }
-                    is CallState.Idle, is CallState.Disconnected -> {
-                        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                    }
+            LaunchedEffect(callState is CallState.Connected || callState is CallState.Incoming || callState is CallState.Outgoing) {
+                val isActive = callState is CallState.Connected || callState is CallState.Incoming || callState is CallState.Outgoing
+                if (isActive) {
+                    window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                } else {
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 }
             }
 

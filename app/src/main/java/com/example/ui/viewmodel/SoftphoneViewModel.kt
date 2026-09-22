@@ -32,7 +32,8 @@ class SoftphoneViewModel(
     private val accountRepository: SipAccountRepository = SoftphoneApp.instance.accountRepository,
     private val callLogRepository: CallLogRepository = SoftphoneApp.instance.callLogRepository,
     private val settingsRepository: SettingsRepository = SoftphoneApp.instance.settingsRepository,
-    private val fcmTokenManager: FcmTokenManager = SoftphoneApp.instance.fcmTokenManager
+    private val fcmTokenManager: FcmTokenManager = SoftphoneApp.instance.fcmTokenManager,
+    private val contactsRepository: com.example.data.repository.ContactsRepository = SoftphoneApp.instance.contactsRepository
 ) : ViewModel() {
 
     val settings: StateFlow<AppSettings> = settingsRepository.settings
@@ -41,8 +42,51 @@ class SoftphoneViewModel(
     val fcmTokenStatus: StateFlow<String> = fcmTokenManager.tokenStatus
     val receivedPushes: StateFlow<List<PushMessageItem>> = fcmTokenManager.receivedPushes
 
+    // Device Contacts Management
+    val deviceContacts: StateFlow<List<com.example.data.model.PhoneContact>> = contactsRepository.contacts
+    val isContactsLoading: StateFlow<Boolean> = contactsRepository.isLoading
+    private val _contactsSearchQuery = MutableStateFlow("")
+    val contactsSearchQuery: StateFlow<String> = _contactsSearchQuery.asStateFlow()
+
+    val filteredContacts: StateFlow<List<com.example.data.model.PhoneContact>> = combine(
+        contactsRepository.contacts,
+        _contactsSearchQuery
+    ) { contacts, query ->
+        if (query.isBlank()) {
+            contacts
+        } else {
+            val q = query.trim().lowercase()
+            contacts.filter { contact ->
+                contact.name.lowercase().contains(q) ||
+                        contact.allNumbers.any { it.contains(q) }
+            }
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun searchContacts(query: String) {
+        _contactsSearchQuery.value = query
+    }
+
+    fun loadDeviceContacts() {
+        viewModelScope.launch {
+            contactsRepository.loadContacts()
+        }
+    }
+
+    fun hasContactsPermission(): Boolean {
+        return contactsRepository.hasContactsPermission()
+    }
+
+    fun getContactNameForUri(uriOrNumber: String): String? {
+        return contactsRepository.findContactName(uriOrNumber)
+    }
+
     fun refreshFcmToken() {
         fcmTokenManager.refreshToken()
+    }
+
+    fun generateTestFcmToken() {
+        fcmTokenManager.generateTestToken()
     }
 
     fun clearPushHistory() {
@@ -82,6 +126,11 @@ class SoftphoneViewModel(
     fun updateSettings(newSettings: AppSettings) {
         settingsRepository.updateSettings(newSettings)
         sipManager.applySettings(newSettings)
+    }
+
+    fun resetSettingsToDefaults() {
+        val defaultSettings = AppSettings()
+        updateSettings(defaultSettings)
     }
 
     val registrationState: StateFlow<RegistrationStatus> = sipManager.registrationState
@@ -208,6 +257,10 @@ class SoftphoneViewModel(
 
     fun swapActiveAndHeldCalls() {
         sipManager.swapActiveAndHeldCalls()
+    }
+
+    fun hangupSecondaryCall() {
+        sipManager.hangupSecondaryCall()
     }
 
     fun saveAccount(account: SipAccount, makeActive: Boolean = true) {

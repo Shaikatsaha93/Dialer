@@ -81,6 +81,7 @@ fun DialerScreen(
     val settings by viewModel.settings.collectAsStateWithLifecycle()
 
     val isCallActive = callState !is CallState.Idle && callState !is CallState.Disconnected
+    val matchedContactName = if (dialerInput.isNotBlank()) viewModel.getContactNameForUri(dialerInput) else null
 
     val infiniteTransition = rememberInfiniteTransition(label = "PulseAnimation")
     val pulseScale by infiniteTransition.animateFloat(
@@ -134,6 +135,7 @@ fun DialerScreen(
 
                     NumberDisplayField(
                         dialerInput = dialerInput,
+                        matchedContactName = matchedContactName,
                         isCompactHeight = false
                     )
 
@@ -221,6 +223,7 @@ fun DialerScreen(
 
                 NumberDisplayField(
                     dialerInput = dialerInput,
+                    matchedContactName = matchedContactName,
                     isCompactHeight = isCompactHeight
                 )
 
@@ -429,6 +432,7 @@ private fun OngoingCallBanner(
 @Composable
 private fun NumberDisplayField(
     dialerInput: String,
+    matchedContactName: String? = null,
     isCompactHeight: Boolean
 ) {
     Surface(
@@ -439,11 +443,11 @@ private fun NumberDisplayField(
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
     ) {
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = if (isCompactHeight) 8.dp else 12.dp),
-            contentAlignment = Alignment.Center
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
                 text = if (dialerInput.isEmpty()) "Enter number or SIP URI" else dialerInput,
@@ -459,6 +463,17 @@ private fun NumberDisplayField(
                 textAlign = TextAlign.Center,
                 modifier = Modifier.testTag("dialer_display_text")
             )
+            if (!matchedContactName.isNullOrBlank()) {
+                Text(
+                    text = "👤 $matchedContactName",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
         }
     }
 }

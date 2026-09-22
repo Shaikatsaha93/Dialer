@@ -37,6 +37,8 @@ class SoftphoneApp : Application() {
         private set
     lateinit var fcmTokenManager: FcmTokenManager
         private set
+    lateinit var contactsRepository: com.example.data.repository.ContactsRepository
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -47,12 +49,18 @@ class SoftphoneApp : Application() {
         callLogRepository = CallLogRepository(database.callLogDao())
         settingsRepository = SettingsRepository(this)
         fcmTokenManager = FcmTokenManager(this)
+        contactsRepository = com.example.data.repository.ContactsRepository(this)
         sipManager = LinphoneSipManager(this)
         telecomHelper = TelecomHelper(this)
 
         telecomHelper.registerPhoneAccount()
         sipManager.initializeSdk()
         fcmTokenManager.initialize()
+        if (contactsRepository.hasContactsPermission()) {
+            applicationScope.launch {
+                contactsRepository.loadContacts()
+            }
+        }
 
         observeActiveAccount()
         observeCallEvents()
@@ -89,9 +97,14 @@ class SoftphoneApp : Application() {
                             } else {
                                 CallType.OUTGOING
                             }
+                            val resolvedDisplayName = if (event.displayName.isNotBlank() && !event.displayName.startsWith("sip:")) {
+                                event.displayName
+                            } else {
+                                contactsRepository.findContactName(event.remoteUri) ?: ""
+                            }
                             callLogRepository.addLog(
                                 remoteUri = event.remoteUri,
-                                displayName = event.displayName,
+                                displayName = resolvedDisplayName,
                                 callType = callType,
                                 durationSeconds = event.durationSeconds
                             )

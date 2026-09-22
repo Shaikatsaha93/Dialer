@@ -63,6 +63,7 @@ fun SoftphoneMainScreen(
         add(Manifest.permission.RECORD_AUDIO)
         add(Manifest.permission.CAMERA)
         add(Manifest.permission.READ_PHONE_STATE)
+        add(Manifest.permission.READ_CONTACTS)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             add(Manifest.permission.MANAGE_OWN_CALLS)
         }
@@ -73,7 +74,11 @@ fun SoftphoneMainScreen(
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { _ -> }
+    ) { results ->
+        if (results[Manifest.permission.READ_CONTACTS] == true) {
+            viewModel.loadDeviceContacts()
+        }
+    }
 
     LaunchedEffect(Unit) {
         permissionLauncher.launch(permissionsToRequest)
@@ -258,6 +263,17 @@ private fun NavHostContent(
                         }
                         launchSingleTop = true
                         restoreState = true
+                    }
+                }
+            )
+        }
+
+        composable(Screen.Contacts.route) {
+            ContactsScreen(
+                viewModel = viewModel,
+                onNavigateToActiveCall = {
+                    navController.navigate(Screen.ActiveCall.route) {
+                        launchSingleTop = true
                     }
                 }
             )

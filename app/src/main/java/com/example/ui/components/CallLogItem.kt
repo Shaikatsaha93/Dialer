@@ -74,6 +74,22 @@ fun CallLogItem(
         "%02d:%02d".format(min, sec)
     }
 
+    // Clean number extraction (remove sip:, sips:, and @domain.com)
+    val cleanNumber = entry.remoteUri
+        .removePrefix("sip:")
+        .removePrefix("sips:")
+        .substringBefore("@")
+        .trim()
+
+    val rawDisplayName = entry.displayName.trim()
+    val cleanDisplayName = if (rawDisplayName.startsWith("sip:", ignoreCase = true) || rawDisplayName.startsWith("sips:", ignoreCase = true)) {
+        rawDisplayName.removePrefix("sip:").removePrefix("sips:").substringBefore("@").trim()
+    } else {
+        rawDisplayName
+    }
+
+    val hasDistinctContactName = cleanDisplayName.isNotBlank() && cleanDisplayName != cleanNumber
+
     Card(
         modifier = modifier
             .fillMaxWidth()
@@ -107,17 +123,24 @@ fun CallLogItem(
             Spacer(modifier = Modifier.width(12.dp))
 
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = entry.displayName.ifBlank { entry.remoteUri },
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                if (entry.displayName.isNotBlank() && entry.displayName != entry.remoteUri) {
+                if (hasDistinctContactName) {
                     Text(
-                        text = entry.remoteUri,
+                        text = cleanDisplayName,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = cleanNumber,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    Text(
+                        text = cleanNumber.ifBlank { "Unknown" },
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                 }
                 Row(

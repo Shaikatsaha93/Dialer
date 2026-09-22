@@ -73,4 +73,8 @@ class SettingsRepository(context: Context) {
     fun setThemeMode(mode: AppThemeMode) {
         updateSettings(_settings.value.copy(themeMode = mode))
     }
+
+    fun resetToDefaults() {
+        updateSettings(AppSettings())
+    }
 }

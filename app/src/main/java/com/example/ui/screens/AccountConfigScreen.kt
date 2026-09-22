@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Refresh
@@ -104,7 +105,7 @@ fun AccountConfigScreen(
 
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
-    var domain by remember { mutableStateOf("sip.linphone.org") }
+    var domain by remember { mutableStateOf("") }
     var port by remember { mutableStateOf("5060") }
     var displayName by remember { mutableStateOf("") }
     var selectedTransport by remember { mutableStateOf(SipTransport.UDP) }
@@ -161,7 +162,7 @@ fun AccountConfigScreen(
                             onFillDemo = {
                                 username = "1001"
                                 password = "secretPassword123"
-                                domain = "sip.linphone.org"
+                                domain = "192.168.1.100"
                                 port = "5060"
                                 displayName = "Desk Extension"
                                 selectedTransport = SipTransport.UDP
@@ -230,7 +231,8 @@ fun AccountConfigScreen(
 
                     VoipSettingsSection(
                         settings = settings,
-                        onSettingsChanged = { viewModel.updateSettings(it) }
+                        onSettingsChanged = { viewModel.updateSettings(it) },
+                        onResetDefaults = { viewModel.resetSettingsToDefaults() }
                     )
 
                     FcmPushSection(
@@ -240,6 +242,7 @@ fun AccountConfigScreen(
                         settings = settings,
                         onSettingsChanged = { viewModel.updateSettings(it) },
                         onRefreshToken = { viewModel.refreshFcmToken() },
+                        onGenerateTestToken = { viewModel.generateTestFcmToken() },
                         onClearPushHistory = { viewModel.clearPushHistory() },
                         onSimulatePush = { title, body, isVoip, callerUri, callerName ->
                             viewModel.simulatePushNotification(title, body, isVoip, callerUri, callerName)
@@ -310,7 +313,7 @@ fun AccountConfigScreen(
                         onFillDemo = {
                             username = "1001"
                             password = "secretPassword123"
-                            domain = "sip.linphone.org"
+                            domain = "192.168.1.100"
                             port = "5060"
                             displayName = "Desk Extension"
                             selectedTransport = SipTransport.UDP
@@ -344,7 +347,8 @@ fun AccountConfigScreen(
 
                 VoipSettingsSection(
                     settings = settings,
-                    onSettingsChanged = { viewModel.updateSettings(it) }
+                    onSettingsChanged = { viewModel.updateSettings(it) },
+                    onResetDefaults = { viewModel.resetSettingsToDefaults() }
                 )
 
                 FcmPushSection(
@@ -354,6 +358,7 @@ fun AccountConfigScreen(
                     settings = settings,
                     onSettingsChanged = { viewModel.updateSettings(it) },
                     onRefreshToken = { viewModel.refreshFcmToken() },
+                    onGenerateTestToken = { viewModel.generateTestFcmToken() },
                     onClearPushHistory = { viewModel.clearPushHistory() },
                     onSimulatePush = { title, body, isVoip, callerUri, callerName ->
                         viewModel.simulatePushNotification(title, body, isVoip, callerUri, callerName)
@@ -835,8 +840,17 @@ private fun AddAccountFormCard(
             OutlinedTextField(
                 value = domain,
                 onValueChange = onDomainChange,
-                label = { Text("Domain / Proxy Server") },
-                placeholder = { Text("e.g. sip.linphone.org") },
+                label = { Text("SIP Server (Domain / IP / Proxy)") },
+                placeholder = { Text("e.g. 192.168.1.100 or sip.yourcompany.com") },
+                supportingText = {
+                    Text("Enter any SIP Server IP, Domain, Asterisk, FreePBX, or VoIP provider")
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Default.Dns,
+                        contentDescription = "SIP Server"
+                    )
+                },
                 singleLine = true,
                 modifier = Modifier
                     .fillMaxWidth()

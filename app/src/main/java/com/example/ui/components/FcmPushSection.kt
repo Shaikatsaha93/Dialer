@@ -79,6 +79,7 @@ fun FcmPushSection(
     settings: AppSettings,
     onSettingsChanged: (AppSettings) -> Unit,
     onRefreshToken: () -> Unit,
+    onGenerateTestToken: () -> Unit = {},
     onClearPushHistory: () -> Unit,
     onSimulatePush: (title: String, body: String, isVoip: Boolean, callerUri: String, callerName: String) -> Unit,
     modifier: Modifier = Modifier
@@ -243,11 +244,38 @@ fun FcmPushSection(
                             )
                         }
                     } else {
-                        Text(
-                            text = tokenStatus,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                text = tokenStatus,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Button(
+                                    onClick = onRefreshToken,
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.weight(1f).testTag("btn_fetch_fcm_token")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Refresh,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Fetch Token", fontSize = 12.sp)
+                                }
+                                OutlinedButton(
+                                    onClick = onGenerateTestToken,
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.weight(1f).testTag("btn_generate_test_token")
+                                ) {
+                                    Text("Generate Test Token", fontSize = 12.sp)
+                                }
+                            }
+                        }
                     }
                 }
             }

@@ -220,15 +220,21 @@ class SipForegroundService : Service() {
 
     private fun startForegroundWithNotification(title: String, text: String) {
         val notification = buildNotification(title, text, isOngoingCall = false)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val foregroundServiceType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL)
             } else {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
+                startForeground(NOTIFICATION_ID, notification)
             }
-            startForeground(NOTIFICATION_ID, notification, foregroundServiceType)
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+        } catch (e: SecurityException) {
+            Log.e(TAG, "SecurityException starting foreground service: ${e.message}")
+            try {
+                startForeground(NOTIFICATION_ID, notification)
+            } catch (fallbackError: Throwable) {
+                Log.e(TAG, "Fallback startForeground error: ${fallbackError.message}")
+            }
+        } catch (e: Throwable) {
+            Log.e(TAG, "Failed to start foreground service: ${e.message}")
         }
     }
 

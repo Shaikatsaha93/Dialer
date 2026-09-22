@@ -186,8 +186,18 @@ fun CallHistoryScreen(
                 contentPadding = PaddingValues(vertical = 8.dp)
             ) {
                 items(callLogs, key = { it.id }) { log ->
+                    val resolvedName = if (log.displayName.isNotBlank() && !log.displayName.startsWith("sip:")) {
+                        log.displayName
+                    } else {
+                        viewModel.getContactNameForUri(log.remoteUri) ?: log.displayName
+                    }
+                    val displayEntry = if (resolvedName != log.displayName) {
+                        log.copy(displayName = resolvedName)
+                    } else {
+                        log
+                    }
                     CallLogItem(
-                        entry = log,
+                        entry = displayEntry,
                         onCallBack = { uri ->
                             viewModel.initiateCall(uri)
                             onNavigateToActiveCall()
