@@ -19,6 +19,8 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import com.example.ui.theme.LocalGlassColors
+import com.example.ui.theme.glassEdgeBrush
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -63,9 +65,9 @@ fun ContactItem(
             .testTag("contact_item_${contact.id}"),
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+            containerColor = LocalGlassColors.current.fill
         ),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.1f))
+        border = BorderStroke(1.dp, glassEdgeBrush(LocalGlassColors.current))
     ) {
         Row(
             modifier = Modifier

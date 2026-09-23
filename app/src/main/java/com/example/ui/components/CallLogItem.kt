@@ -1,5 +1,6 @@
 package com.example.ui.components
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,6 +19,8 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import com.example.ui.theme.LocalGlassColors
+import com.example.ui.theme.glassEdgeBrush
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -96,8 +99,9 @@ fun CallLogItem(
             .testTag("call_log_item_${entry.id}"),
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
-        )
+            containerColor = LocalGlassColors.current.fill
+        ),
+        border = BorderStroke(1.dp, glassEdgeBrush(LocalGlassColors.current))
     ) {
         Row(
             modifier = Modifier

@@ -55,6 +55,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.ui.theme.LocalGlassColors
+import com.example.ui.theme.glass
 import com.example.data.model.AccountBalance
 import com.example.data.model.AppThemeMode
 import com.example.data.model.CallState
@@ -337,12 +339,11 @@ private fun AccountStatusBar(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
+            .glass(RoundedCornerShape(20.dp), LocalGlassColors.current)
             .clickable(onClick = onClick)
             .testTag("dialer_account_status_bar"),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-        shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+        color = Color.Transparent,
+        shape = RoundedCornerShape(20.dp)
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
@@ -465,10 +466,10 @@ private fun NumberDisplayField(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 4.dp),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+            .padding(horizontal = 4.dp)
+            .glass(RoundedCornerShape(22.dp), LocalGlassColors.current),
+        shape = RoundedCornerShape(22.dp),
+        color = Color.Transparent
     ) {
         Column(
             modifier = Modifier
@@ -527,10 +528,10 @@ private fun CallActionsRow(
         Surface(
             onClick = onSimulateCall,
             shape = CircleShape,
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+            color = Color.Transparent,
             modifier = Modifier
                 .size(if (isCompactHeight) 48.dp else 52.dp)
+                .glass(CircleShape, LocalGlassColors.current)
                 .testTag("simulate_call_btn")
         ) {
             Box(contentAlignment = Alignment.Center) {
@@ -569,15 +570,14 @@ private fun CallActionsRow(
         Surface(
             modifier = Modifier
                 .size(if (isCompactHeight) 48.dp else 52.dp)
-                .clip(CircleShape)
+                .glass(CircleShape, LocalGlassColors.current)
                 .combinedClickable(
                     onClick = onBackspace,
                     onLongClick = onClearAll
                 )
                 .testTag("dialer_backspace_button"),
             shape = CircleShape,
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+            color = Color.Transparent
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(

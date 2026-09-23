@@ -1,6 +1,8 @@
 package com.example.ui.components
 
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.ui.graphics.Color
+import com.example.ui.theme.LocalGlassColors
+import com.example.ui.theme.glass
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -89,12 +91,10 @@ fun KeypadButton(
         onClick = onClick,
         modifier = modifier
             .size(size)
+            .glass(CircleShape, LocalGlassColors.current)
             .testTag("dialer_key_${key.char}"),
         shape = CircleShape,
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.18f)),
-        tonalElevation = 3.dp,
-        shadowElevation = 1.dp
+        color = Color.Transparent
     ) {
         Column(
             modifier = Modifier.padding(vertical = 4.dp),

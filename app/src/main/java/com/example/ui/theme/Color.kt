@@ -2,54 +2,54 @@ package com.example.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// Dialer - Modern Telephony Brand Colors
-val DialerPrimaryLight = Color(0xFF026AA2)
+// Dialer brand colors: Apple iOS system palette (system blue accent, neutral grays)
+val DialerPrimaryLight = Color(0xFF007AFF)
 val DialerOnPrimaryLight = Color(0xFFFFFFFF)
-val DialerPrimaryContainerLight = Color(0xFFD0E8FF)
-val DialerOnPrimaryContainerLight = Color(0xFF001E36)
+val DialerPrimaryContainerLight = Color(0xFFD6E8FF)
+val DialerOnPrimaryContainerLight = Color(0xFF002A5C)
 
-val DialerSecondaryLight = Color(0xFF0F766E)
+val DialerSecondaryLight = Color(0xFF007AFF)
 val DialerOnSecondaryLight = Color(0xFFFFFFFF)
-val DialerSecondaryContainerLight = Color(0xFFCCFBF1)
-val DialerOnSecondaryContainerLight = Color(0xFF00201D)
+val DialerSecondaryContainerLight = Color(0xFFD6E8FF)
+val DialerOnSecondaryContainerLight = Color(0xFF002A5C)
 
-val DialerBackgroundLight = Color(0xFFF8FAFC)
-val DialerOnBackgroundLight = Color(0xFF0F172A)
+val DialerBackgroundLight = Color(0xFFF2F2F7)
+val DialerOnBackgroundLight = Color(0xFF1C1C1E)
 val DialerSurfaceLight = Color(0xFFFFFFFF)
-val DialerOnSurfaceLight = Color(0xFF0F172A)
-val DialerSurfaceVariantLight = Color(0xFFE2E8F0)
-val DialerOnSurfaceVariantLight = Color(0xFF475569)
+val DialerOnSurfaceLight = Color(0xFF1C1C1E)
+// White so the translucent surfaceVariant panels read as frosted glass over the backdrop
+val DialerSurfaceVariantLight = Color(0xFFFFFFFF)
+val DialerOnSurfaceVariantLight = Color(0xFF6C6C70)
 
-// Dark Mode - Deep Space Navy & Electric Cyan
-val DialerPrimaryDark = Color(0xFF38BDF8)
-val DialerOnPrimaryDark = Color(0xFF082F49)
-val DialerPrimaryContainerDark = Color(0xFF0369A1)
-val DialerOnPrimaryContainerDark = Color(0xFFE0F2FE)
+// Dark Mode - iOS dark system colors
+val DialerPrimaryDark = Color(0xFF0A84FF)
+val DialerOnPrimaryDark = Color(0xFFFFFFFF)
+val DialerPrimaryContainerDark = Color(0xFF0A3D7A)
+val DialerOnPrimaryContainerDark = Color(0xFFD6E8FF)
 
-val DialerSecondaryDark = Color(0xFF2DD4BF)
-val DialerOnSecondaryDark = Color(0xFF003732)
-val DialerSecondaryContainerDark = Color(0xFF115E59)
-val DialerOnSecondaryContainerDark = Color(0xFFCCFBF1)
+val DialerSecondaryDark = Color(0xFF0A84FF)
+val DialerOnSecondaryDark = Color(0xFFFFFFFF)
+val DialerSecondaryContainerDark = Color(0xFF1B3A63)
+val DialerOnSecondaryContainerDark = Color(0xFFD6E8FF)
 
-val DialerBackgroundDark = Color(0xFF0A0F1D)
-val DialerOnBackgroundDark = Color(0xFFF1F5F9)
-val DialerSurfaceDark = Color(0xFF111827)
-val DialerOnSurfaceDark = Color(0xFFF1F5F9)
-val DialerSurfaceVariantDark = Color(0xFF1E293B)
-val DialerOnSurfaceVariantDark = Color(0xFF94A3B8)
+val DialerBackgroundDark = Color(0xFF000000)
+val DialerOnBackgroundDark = Color(0xFFF2F2F7)
+val DialerSurfaceDark = Color(0xFF1C1C1E)
+val DialerOnSurfaceDark = Color(0xFFF2F2F7)
+val DialerSurfaceVariantDark = Color(0xFF3A3A3C)
+val DialerOnSurfaceVariantDark = Color(0xFF98989F)
 
-// Dedicated Call Action Semantic Colors
-val CallActionGreen = Color(0xFF10B981)
-val CallActionGreenDark = Color(0xFF00E676)
-val CallActionRed = Color(0xFFF43F5E)
-val CallActionRedDark = Color(0xFFFF1744)
-val CallActionAmber = Color(0xFFF59E0B)
-val CallActionGray = Color(0xFF475569)
-val CallActionGrayLight = Color(0xFFE2E8F0)
-val CallActionActiveTonal = Color(0xFF1E293B)
+// Dedicated Call Action Semantic Colors (iOS system green / red / orange / gray)
+val CallActionGreen = Color(0xFF34C759)
+val CallActionGreenDark = Color(0xFF30D158)
+val CallActionRed = Color(0xFFFF3B30)
+val CallActionRedDark = Color(0xFFFF453A)
+val CallActionAmber = Color(0xFFFF9500)
+val CallActionGray = Color(0xFF8E8E93)
+val CallActionGrayLight = Color(0xFFE5E5EA)
+val CallActionActiveTonal = Color(0xFF2C2C2E)
 
-// Accent Cyan Glow
-val DialerCyanGlow = Color(0xFF00E5FF)
-val DialerBrandIndigo = Color(0xFF6366F1)
-val DialerCardBorder = Color(0x3338BDF8)
-
+// Accents
+val DialerCyanGlow = Color(0xFF64D2FF)
+val DialerBrandIndigo = Color(0xFF5856D6)
+val DialerCardBorder = Color(0x33007AFF)

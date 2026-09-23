@@ -96,6 +96,8 @@ import com.example.data.model.ConferenceParticipant
 import com.example.ui.components.DtmfKeypad
 import com.example.ui.theme.CallActionGreen
 import com.example.ui.theme.CallActionRed
+import com.example.ui.theme.LocalGlassColors
+import com.example.ui.theme.glass
 import com.example.ui.viewmodel.SoftphoneViewModel
 
 fun formatCallerInfo(displayName: String?, remoteUri: String?): Pair<String, String> {
@@ -1090,8 +1092,7 @@ private fun ConferenceParticipantRow(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surface)
+            .glass(RoundedCornerShape(14.dp), LocalGlassColors.current)
             .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
@@ -1174,18 +1175,19 @@ private fun CallControlButton(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        val glassColors = LocalGlassColors.current
         Surface(
             onClick = onClick,
             shape = CircleShape,
-            color = if (isActive) activeColor else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-            border = BorderStroke(
-                1.dp,
-                if (isActive) activeColor else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
-            ),
+            color = Color.Transparent,
             modifier = Modifier
-                .size(52.dp)
-                .testTag(testTag),
-            shadowElevation = if (isActive) 4.dp else 1.dp
+                .size(56.dp)
+                .glass(
+                    CircleShape,
+                    glassColors,
+                    fill = if (isActive) activeColor.copy(alpha = 0.85f) else glassColors.fill
+                )
+                .testTag(testTag)
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(

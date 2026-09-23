@@ -17,8 +17,11 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.AccountCircle
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import com.example.ui.theme.LocalGlassColors
+import com.example.ui.theme.glassEdgeBrush
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -73,7 +76,8 @@ fun AccountCard(
                 MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
             }
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = if (isActive) 2.dp else 0.dp)
+        border = BorderStroke(1.dp, glassEdgeBrush(LocalGlassColors.current)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Row(
             modifier = Modifier

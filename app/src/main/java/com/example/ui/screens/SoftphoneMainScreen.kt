@@ -45,7 +45,12 @@ import androidx.navigation.compose.rememberNavController
 import com.example.data.model.CallState
 import com.example.ui.navigation.BottomNavItems
 import com.example.ui.navigation.Screen
+import com.example.ui.theme.GlassBackground
+import com.example.ui.theme.LocalGlassColors
+import com.example.ui.theme.glass
 import com.example.ui.viewmodel.SoftphoneViewModel
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Color
 
 @Composable
 fun SoftphoneMainScreen(
@@ -95,7 +100,10 @@ fun SoftphoneMainScreen(
         }
     }
 
-    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+    val glassColors = LocalGlassColors.current
+
+    GlassBackground(modifier = modifier) {
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val isWideScreen = maxWidth >= 600.dp
         val isCallScreen = currentRoute == Screen.ActiveCall.route
 
@@ -105,8 +113,10 @@ fun SoftphoneMainScreen(
                 NavigationRail(
                     modifier = Modifier
                         .fillMaxHeight()
+                        .padding(8.dp)
+                        .glass(RoundedCornerShape(28.dp), glassColors)
                         .testTag("softphone_navigation_rail"),
-                    containerColor = MaterialTheme.colorScheme.surface,
+                    containerColor = Color.Transparent,
                     header = {
                         Spacer(modifier = Modifier.height(16.dp))
                     }
@@ -168,15 +178,20 @@ fun SoftphoneMainScreen(
             // Mobile Compact Layout with Bottom NavigationBar
             Scaffold(
                 modifier = Modifier.fillMaxSize(),
+                containerColor = Color.Transparent,
                 contentWindowInsets = WindowInsets.safeDrawing,
                 bottomBar = {
                     AnimatedVisibility(visible = !isCallScreen) {
+                        // Floating glass tab bar
                         NavigationBar(
                             modifier = Modifier
                                 .windowInsetsPadding(WindowInsets.navigationBars)
+                                .padding(horizontal = 14.dp, vertical = 8.dp)
+                                .glass(RoundedCornerShape(30.dp), glassColors)
                                 .testTag("softphone_bottom_navigation"),
-                            containerColor = MaterialTheme.colorScheme.surface,
-                            tonalElevation = 8.dp
+                            containerColor = Color.Transparent,
+                            tonalElevation = 0.dp,
+                            windowInsets = WindowInsets(0, 0, 0, 0)
                         ) {
                             BottomNavItems.forEach { screen ->
                                 val selected = currentRoute == screen.route
@@ -234,6 +249,7 @@ fun SoftphoneMainScreen(
                 }
             }
         }
+    }
     }
 }
 
