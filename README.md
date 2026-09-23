@@ -17,6 +17,7 @@ It registers to a SIP server (tested with **iTelSwitchPlus 8.0.0**), places and 
 - **Android Telecom integration** through a self-managed `ConnectionService`, a foreground service and an ongoing-call notification with Hang up, Mute and Speaker actions.
 - **Background operation:** wake lock and Wi-Fi lock during calls, lock-screen display, optional auto-answer.
 - **Firebase Cloud Messaging:** receives push messages. A push with `type=call` (or a `caller_uri` field) shows the incoming-call screen.
+- **Glass design:** frosted-glass panels on a soft gradient backdrop, a floating tab bar, and Apple iOS system colors. Works in light and dark mode.
 - **Settings:** echo cancellation, adaptive rate control, mic gain, STUN, IPv6, keep-alive, theme (System, Light or Dark).
 - **Diagnostics:** in-app SIP log viewer. SDK logs are also mirrored to logcat under the `LinphoneSdk` tag.
 
@@ -46,10 +47,36 @@ app/src/main/java/com/example/
 └── ui/
     ├── screens/    Dialer, Active call, Contacts, History, Account settings
     ├── components/ Keypad, cards, settings sections
+    ├── theme/      Colors, typography, glass style (Glass.kt)
     └── viewmodel/  SoftphoneViewModel
 ```
 
 Almost all call logic is in [`SipManager.kt`](app/src/main/java/com/example/sip/SipManager.kt).
+
+## Design
+
+The UI uses a frosted-glass style similar to iOS "Liquid Glass", with Apple's iOS system colors.
+
+- **Backdrop:** a soft gradient with faint system-blue glows, drawn behind every screen by `GlassBackground`.
+- **Glass panels:** the `Modifier.glass(shape, colors)` extension draws a translucent fill, a light sheen at the top and a bright hairline edge. Keypad keys, the account status card, the number field, call controls and list cards use it. Active buttons, such as Mute when it is on, are filled with their own color.
+- **Floating tab bar:** the bottom navigation is a rounded glass bar that floats above the screen edge.
+- **System bars:** status and navigation bar icons follow the app theme, so they stay readable in dark mode.
+
+| | Light | Dark |
+|---|---|---|
+| Accent (buttons, selected tab, links) | `#007AFF` | `#0A84FF` |
+| Background | `#F2F2F7` | `#000000` |
+| Call button | `#34C759` | `#34C759` |
+| Hang up button | `#FF3B30` | `#FF3B30` |
+| Primary text | `#1C1C1E` | `#F2F2F7` |
+| Secondary text | `#6C6C70` | `#98989F` |
+
+To change the look, edit two files:
+
+- [`ui/theme/Color.kt`](app/src/main/java/com/example/ui/theme/Color.kt): accent, text and call-button colors.
+- [`ui/theme/Glass.kt`](app/src/main/java/com/example/ui/theme/Glass.kt): glass transparency, edge brightness, and the backdrop gradient and glow colors (`LightGlassColors`, `DarkGlassColors`).
+
+The glass panels are translucent but do not blur the content behind them. The backdrop is already soft, so they read as frosted glass and run smoothly on Android 7 and newer. Real backdrop blur would need a library such as Haze and works only on Android 12 and newer.
 
 ## Build and run
 
