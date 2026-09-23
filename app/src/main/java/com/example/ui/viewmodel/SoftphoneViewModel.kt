@@ -87,7 +87,7 @@ class SoftphoneViewModel(
     }
 
     fun generateTestFcmToken() {
-        fcmTokenManager.generateTestToken()
+        fcmTokenManager.refreshToken()
     }
 
     fun clearPushHistory() {

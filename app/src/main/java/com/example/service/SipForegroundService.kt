@@ -32,6 +32,8 @@ class SipForegroundService : Service() {
     private var registrationCollectJob: Job? = null
 
     private var wakeLock: PowerManager.WakeLock? = null
+    // Foreground service type currently in effect (-1 = not in the foreground yet)
+    private var foregroundType = -1
     private var wifiLock: WifiManager.WifiLock? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -219,13 +221,37 @@ class SipForegroundService : Service() {
     }
 
     private fun startForegroundWithNotification(title: String, text: String) {
-        val notification = buildNotification(title, text, isOngoingCall = false)
+        val inCall = SoftphoneApp.instance.sipManager.callState.value !is CallState.Idle
+        foregroundType = -1
+        showForeground(buildNotification(title, text, isOngoingCall = false), inCall)
+    }
+
+    /**
+     * Idle standby runs as "specialUse" (Android 14+): Android 15 refuses to start a "phoneCall"
+     * service from BOOT_COMPLETED, and an idle registration is not a call. While a call is
+     * ringing or active the service is switched to "phoneCall".
+     */
+    private fun serviceType(inCall: Boolean): Int = when {
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.Q -> 0
+        inCall || Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE ->
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
+        else -> ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+    }
+
+    private fun showForeground(notification: Notification, inCall: Boolean) {
+        val type = serviceType(inCall)
+        if (type == foregroundType) {
+            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.notify(NOTIFICATION_ID, notification)
+            return
+        }
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL)
+                startForeground(NOTIFICATION_ID, notification, type)
             } else {
                 startForeground(NOTIFICATION_ID, notification)
             }
+            foregroundType = type
         } catch (e: SecurityException) {
             Log.e(TAG, "SecurityException starting foreground service: ${e.message}")
             try {
@@ -246,8 +272,7 @@ class SipForegroundService : Service() {
         isMuted: Boolean = false,
         isSpeakerOn: Boolean = false
     ) {
-        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        manager.notify(NOTIFICATION_ID, buildNotification(title, text, isOngoingCall, isIncoming, isMuted, isSpeakerOn))
+        showForeground(buildNotification(title, text, isOngoingCall, isIncoming, isMuted, isSpeakerOn), isOngoingCall)
     }
 
     private fun buildNotification(
@@ -285,6 +310,16 @@ class SipForegroundService : Service() {
             val declineIntent = Intent(this, SipForegroundService::class.java).apply { action = ACTION_HANGUP }
             val declinePendingIntent = PendingIntent.getService(this, 11, declineIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
+            // Opens the call screen over the lock screen (like WhatsApp) instead of only a banner
+            val fullScreenPendingIntent = PendingIntent.getActivity(
+                this,
+                12,
+                Intent(this, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                },
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            builder.setFullScreenIntent(fullScreenPendingIntent, true)
             builder.addAction(android.R.drawable.ic_menu_call, "Answer", answerPendingIntent)
             builder.addAction(android.R.drawable.ic_menu_close_clear_cancel, "Decline", declinePendingIntent)
         } else if (isOngoingCall) {
@@ -369,7 +404,9 @@ class SipForegroundService : Service() {
             }
         }
 
+        /** Called when a call ends: keeps the standby service alive while keep-alive is on. */
         fun stopService(context: Context) {
+            if (SoftphoneApp.instance.settingsRepository.settings.value.backgroundKeepAlive) return
             val intent = Intent(context, SipForegroundService::class.java).apply {
                 action = ACTION_STOP_SERVICE
             }

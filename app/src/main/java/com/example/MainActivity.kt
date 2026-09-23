@@ -14,6 +14,7 @@ import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.AppThemeMode
 import com.example.data.model.CallState
+import com.example.service.BackgroundReliability
 import com.example.service.SipForegroundService
 import com.example.ui.screens.SoftphoneMainScreen
 import com.example.ui.theme.SoftphoneTheme
@@ -48,6 +49,7 @@ class MainActivity : ComponentActivity() {
             LaunchedEffect(settings.backgroundKeepAlive) {
                 if (settings.backgroundKeepAlive) {
                     SipForegroundService.startStandby(this@MainActivity)
+                    askBatteryExemptionOnce()
                 }
             }
 
@@ -71,6 +73,20 @@ class MainActivity : ComponentActivity() {
                 SoftphoneMainScreen(viewModel = viewModel)
             }
         }
+    }
+
+    /**
+     * Without the battery-optimization exemption Doze cuts the network and ignores our wake
+     * lock, so incoming calls are missed in power saving. Asked once; Settings shows the status.
+     */
+    private fun askBatteryExemptionOnce() {
+        if (BackgroundReliability.isIgnoringBatteryOptimizations(this)) return
+        val prefs = getSharedPreferences("background_reliability", MODE_PRIVATE)
+        if (prefs.getBoolean("battery_exemption_asked", false)) return
+        prefs.edit().putBoolean("battery_exemption_asked", true).apply()
+        try {
+            startActivity(BackgroundReliability.batteryOptimizationIntent(this))
+        } catch (_: Exception) {}
     }
 
     private fun configureLockScreenFlags() {

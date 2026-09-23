@@ -329,6 +329,8 @@ fun VoipSettingsSection(
                 onCheckedChange = { onSettingsChanged(settings.copy(showOnLockScreen = it)) }
             )
 
+            BackgroundReliabilityCard()
+
             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f))
 
             // Section 6: Firebase Cloud Messaging (FCM)

@@ -42,11 +42,20 @@ android {
   buildTypes {
     release {
       isCrunchPngs = false
-      isMinifyEnabled = false
+      // R8: strips unused code (e.g. unused Material icons) and resources
+      isMinifyEnabled = true
+      isShrinkResources = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.getByName("release")
+      // Real phones only: 64-bit ARM (almost every phone) and 32-bit ARM (old phones).
+      // Linphone ships ~30 MB of native code per ABI, so x86/x86_64 would double the APK.
+      ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
-    debug { signingConfig = signingConfigs.getByName("debugConfig") }
+    debug {
+      signingConfig = signingConfigs.getByName("debugConfig")
+      // Phones (arm64) and the x86_64 emulator
+      ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
+    }
   }
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_11
@@ -60,6 +69,9 @@ android {
   packaging {
     jniLibs {
       excludes += "**/libmsandroidcamera2.so"
+      // Store native libs compressed in the APK (about half the download size);
+      // Android extracts them once at install time.
+      useLegacyPackaging = true
     }
   }
   dependenciesInfo {
@@ -78,7 +90,8 @@ secrets {
 
 googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.WARN }
 
-// Some unused dependencies are commented out below instead of being removed.
+// Some unused dependencies are commented out below instead of being removed
+// (Retrofit/Moshi/OkHttp, Firebase AI and App Check were never used and only added APK size).
 // This makes it easy to add them back in the future if needed.
 dependencies {
   implementation(platform(libs.androidx.compose.bom))
@@ -106,9 +119,11 @@ dependencies {
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
   // implementation(libs.coil.compose)
-  implementation(libs.converter.moshi)
-  implementation(libs.firebase.ai)
+  // implementation(libs.converter.moshi)
+  // implementation(libs.firebase.ai)
   implementation(libs.firebase.messaging)
+  // GoogleApiAvailability for the FCM Play Services check (came in via App Check before)
+  implementation("com.google.android.gms:play-services-base:18.9.0")
   // Uncomment to use Firestore:
   // implementation(libs.firebase.firestore)
 
@@ -118,15 +133,15 @@ dependencies {
   // implementation(libs.androidx.credentials)
   // implementation(libs.androidx.credentials.play.services)
   // implementation(libs.googleid)
-  implementation(libs.firebase.appcheck.recaptcha)
-  implementation(libs.firebase.appcheck.debug)
+  // implementation(libs.firebase.appcheck.recaptcha)
+  // implementation(libs.firebase.appcheck.debug)
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)
-  implementation(libs.logging.interceptor)
-  implementation(libs.moshi.kotlin)
-  implementation(libs.okhttp)
+  // implementation(libs.logging.interceptor)
+  // implementation(libs.moshi.kotlin)
+  // implementation(libs.okhttp)
   // implementation(libs.play.services.location)
-  implementation(libs.retrofit)
+  // implementation(libs.retrofit)
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)
   testImplementation(libs.androidx.junit)
@@ -144,5 +159,5 @@ dependencies {
   debugImplementation(libs.androidx.compose.ui.test.manifest)
   debugImplementation(libs.androidx.compose.ui.tooling)
   "ksp"(libs.androidx.room.compiler)
-  "ksp"(libs.moshi.kotlin.codegen)
+  // "ksp"(libs.moshi.kotlin.codegen)
 }

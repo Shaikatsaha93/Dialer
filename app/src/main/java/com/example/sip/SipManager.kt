@@ -64,6 +64,8 @@ interface SipManager {
     fun toggleHold()
     fun sendDtmf(dtmfChar: Char)
     fun simulateIncomingCall(callerUri: String, callerName: String)
+    /** A call push arrived: make sure the account is registered so the real INVITE can reach us. */
+    fun onPushWakeup()
     fun simulateAutoAnswer()
 
     // Conference Call Features
@@ -79,7 +81,13 @@ interface SipManager {
 
 sealed class CallEvent {
     data class CallStarted(val remoteUri: String, val displayName: String, val isIncoming: Boolean) : CallEvent()
-    data class CallEnded(val remoteUri: String, val displayName: String, val durationSeconds: Long, val wasMissed: Boolean) : CallEvent()
+    data class CallEnded(
+        val remoteUri: String,
+        val displayName: String,
+        val durationSeconds: Long,
+        val wasMissed: Boolean,
+        val isIncoming: Boolean = false
+    ) : CallEvent()
 }
 
 class LinphoneSipManager(
@@ -93,6 +101,8 @@ class LinphoneSipManager(
     private var secondaryLinphoneCall: Call? = null
     private var durationTimerJob: Job? = null
     private var confStatsJob: Job? = null
+    private var callSessionActive = false
+    private var callSessionIncoming = false
     private var activeAccountModel: SipAccount? = null
     private var currentSettings: AppSettings = AppSettings()
 
@@ -343,8 +353,8 @@ class LinphoneSipManager(
             when (state) {
                 Call.State.IncomingReceived, Call.State.IncomingEarlyMedia -> {
                     _callState.value = CallState.Incoming(remoteAddress, remoteDisplayName)
+                    emitCallStarted(remoteAddress, remoteDisplayName, incoming = true)
                     scope.launch {
-                        _callEvents.emit(CallEvent.CallStarted(remoteAddress, remoteDisplayName, isIncoming = true))
                         if (currentSettings.autoAnswer) {
                             val delayMs = (currentSettings.autoAnswerDelaySeconds.coerceAtLeast(1)) * 1000L
                             _diagnosticLogs.value = (_diagnosticLogs.value + "[SIP Auto-Answer] Answering in ${currentSettings.autoAnswerDelaySeconds}s").takeLast(50)
@@ -357,9 +367,7 @@ class LinphoneSipManager(
                 }
                 Call.State.OutgoingInit, Call.State.OutgoingProgress -> {
                     _callState.value = CallState.Outgoing(remoteAddress, remoteDisplayName, isEarlyMediaOrRinging = false)
-                    scope.launch {
-                        _callEvents.emit(CallEvent.CallStarted(remoteAddress, remoteDisplayName, isIncoming = false))
-                    }
+                    emitCallStarted(remoteAddress, remoteDisplayName, incoming = false)
                 }
                 Call.State.OutgoingRinging, Call.State.OutgoingEarlyMedia -> {
                     _callState.value = CallState.Outgoing(remoteAddress, remoteDisplayName, isEarlyMediaOrRinging = true)
@@ -419,6 +427,15 @@ class LinphoneSipManager(
                         return
                     }
 
+                    // Released after End (or End after hangupCall) belongs to a session that
+                    // is already over; don't disconnect or log it a second time.
+                    if (!callSessionActive) {
+                        currentLinphoneCall = null
+                        primaryLinphoneCall = null
+                        secondaryLinphoneCall = null
+                        return
+                    }
+
                     val duration = _callDuration.value
                     val wasMissed = (_callState.value is CallState.Incoming)
                     stopDurationTimer()
@@ -427,16 +444,9 @@ class LinphoneSipManager(
                     currentLinphoneCall = null
                     primaryLinphoneCall = null
                     secondaryLinphoneCall = null
+                    emitCallEnded(remoteAddress, remoteDisplayName, duration, wasMissed)
 
                     scope.launch {
-                        _callEvents.emit(
-                            CallEvent.CallEnded(
-                                remoteUri = remoteAddress,
-                                displayName = remoteDisplayName,
-                                durationSeconds = duration,
-                                wasMissed = wasMissed
-                            )
-                        )
                         refreshBalanceSoon()
                         delay(1200)
                         if (_callState.value is CallState.Disconnected) {
@@ -548,6 +558,29 @@ class LinphoneSipManager(
         }
     }
 
+    /**
+     * One call session = one CallStarted and one CallEnded (= one history entry).
+     * Linphone reports several terminal events per call (End, then Released), hangupCall()
+     * ends the session itself, and a conference ends several legs; without this guard each
+     * of those wrote its own history row. IncomingReceived/IncomingEarlyMedia and
+     * OutgoingInit/OutgoingProgress likewise both used to report the start.
+     */
+    private fun emitCallStarted(uri: String, displayName: String, incoming: Boolean) {
+        if (callSessionActive) return
+        callSessionActive = true
+        callSessionIncoming = incoming
+        scope.launch { _callEvents.emit(CallEvent.CallStarted(uri, displayName, incoming)) }
+    }
+
+    private fun emitCallEnded(uri: String, displayName: String, durationSeconds: Long, wasMissed: Boolean) {
+        if (!callSessionActive) return
+        callSessionActive = false
+        val incoming = callSessionIncoming
+        scope.launch {
+            _callEvents.emit(CallEvent.CallEnded(uri, displayName, durationSeconds, wasMissed, incoming))
+        }
+    }
+
     /** Re-REGISTER shortly after a call so the balance header shows the post-call balance. */
     private fun refreshBalanceSoon() {
         scope.launch {
@@ -616,6 +649,9 @@ class LinphoneSipManager(
                 config.setString("sip", "enum_domain", "")
                 config.setInt("sip", "inc_timeout", 60)
                 config.setInt("sip", "in_call_timeout", 0)
+                // UDP keepalive every 20s: mobile-carrier NATs often forget an idle UDP mapping
+                // after ~30s, and then the switch's INVITE never reaches the phone.
+                config.setInt("sip", "keepalive_period", 20000)
                 config.setInt("video", "capture", 0)
                 config.setInt("video", "display", 0)
                 config.setInt("video", "enabled", 0)
@@ -647,6 +683,10 @@ class LinphoneSipManager(
             } catch (e: Throwable) {
                 Log.w(TAG, "Native ringing setup: ${e.message}")
             }
+
+            try {
+                newCore.isKeepAliveEnabled = true
+            } catch (_: Throwable) {}
 
             // Ensure network is active so Linphone sockets can send REGISTER packets
             newCore.isNetworkReachable = true
@@ -878,6 +918,21 @@ class LinphoneSipManager(
         }
     }
 
+    override fun onPushWakeup() {
+        scope.launch(Dispatchers.Main) {
+            initializeSdk()
+            val c = core ?: return@launch
+            val account = activeAccountModel
+            if (c.accountList.isEmpty() && account != null) {
+                registerAccount(account)
+            } else {
+                // Re-REGISTERs only if the registration is not currently OK
+                c.ensureRegistered()
+            }
+            _diagnosticLogs.value = (_diagnosticLogs.value + "[FCM] Call push: ensuring SIP registration").takeLast(50)
+        }
+    }
+
     override fun unregisterCurrentAccount() {
         core?.let { c ->
             c.clearAccounts()
@@ -1065,16 +1120,9 @@ class LinphoneSipManager(
 
         stopDurationTimer()
         _callState.value = CallState.Disconnected("Call Terminated")
+        emitCallEnded(remoteUri, dispName, duration, wasMissed)
 
         scope.launch {
-            _callEvents.emit(
-                CallEvent.CallEnded(
-                    remoteUri = remoteUri,
-                    displayName = dispName,
-                    durationSeconds = duration,
-                    wasMissed = wasMissed
-                )
-            )
             refreshBalanceSoon()
             delay(1200)
             _callState.value = CallState.Idle
@@ -1149,9 +1197,7 @@ class LinphoneSipManager(
             remoteUri = callerUri,
             displayName = callerName.ifBlank { callerUri }
         )
-        scope.launch {
-            _callEvents.emit(CallEvent.CallStarted(callerUri, callerName, isIncoming = true))
-        }
+        emitCallStarted(callerUri, callerName, incoming = true)
     }
 
     override fun simulateAutoAnswer() {
@@ -1161,7 +1207,7 @@ class LinphoneSipManager(
     private fun simulateOutgoingCall(uri: String, displayName: String) {
         scope.launch {
             _callState.value = CallState.Outgoing(uri, displayName, isEarlyMediaOrRinging = false)
-            _callEvents.emit(CallEvent.CallStarted(uri, displayName, isIncoming = false))
+            emitCallStarted(uri, displayName, incoming = false)
             delay(1500)
             if (_callState.value is CallState.Outgoing) {
                 _callState.value = CallState.Outgoing(uri, displayName, isEarlyMediaOrRinging = true)

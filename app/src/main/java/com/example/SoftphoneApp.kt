@@ -72,6 +72,11 @@ class SoftphoneApp : Application() {
                 if (activeAcc != null) {
                     Log.d("SoftphoneApp", "Auto-registering active account: ${activeAcc.username}@${activeAcc.domain}")
                     sipManager.registerAccount(activeAcc)
+                    // Also when Android restarts the process (START_STICKY, push, boot):
+                    // without the standby service, Doze stops the registration.
+                    if (settingsRepository.settings.value.backgroundKeepAlive) {
+                        startServiceSafely { SipForegroundService.startStandby(this@SoftphoneApp) }
+                    }
                 } else {
                     sipManager.unregisterCurrentAccount()
                 }
@@ -84,7 +89,7 @@ class SoftphoneApp : Application() {
             sipManager.callEvents.collect { event ->
                 when (event) {
                     is CallEvent.CallStarted -> {
-                        SipForegroundService.startService(this@SoftphoneApp)
+                        startServiceSafely { SipForegroundService.startService(this@SoftphoneApp) }
                         if (event.isIncoming) {
                             telecomHelper.reportIncomingCall(event.remoteUri, event.displayName)
                         }
@@ -92,10 +97,10 @@ class SoftphoneApp : Application() {
                     is CallEvent.CallEnded -> {
                         SipForegroundService.stopService(this@SoftphoneApp)
                         if (settingsRepository.settings.value.recordCallHistory) {
-                            val callType = if (event.wasMissed) {
-                                CallType.MISSED
-                            } else {
-                                CallType.OUTGOING
+                            val callType = when {
+                                event.wasMissed -> CallType.MISSED
+                                event.isIncoming -> CallType.INCOMING
+                                else -> CallType.OUTGOING
                             }
                             val resolvedDisplayName = if (event.displayName.isNotBlank() && !event.displayName.startsWith("sip:")) {
                                 event.displayName
@@ -112,6 +117,16 @@ class SoftphoneApp : Application() {
                     }
                 }
             }
+        }
+    }
+
+    // Android 12+ refuses to start a foreground service from the background unless the app is
+    // exempt (battery-optimization allowlist, push, boot). Log instead of crashing.
+    private inline fun startServiceSafely(start: () -> Unit) {
+        try {
+            start()
+        } catch (e: Exception) {
+            Log.w("SoftphoneApp", "Foreground service not started: ${e.message}")
         }
     }
 

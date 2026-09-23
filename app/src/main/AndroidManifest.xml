@@ -16,6 +16,11 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <!-- Ring reliably in the background: standby after reboot, Doze exemption, lock-screen call UI -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
@@ -58,8 +63,22 @@
 
         <service
             android:name=".service.SipForegroundService"
-            android:foregroundServiceType="phoneCall"
-            android:exported="false" />
+            android:foregroundServiceType="phoneCall|specialUse"
+            android:exported="false">
+            <!-- specialUse = idle standby (phoneCall may not be started from BOOT_COMPLETED on Android 15+) -->
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps the SIP account registered so incoming VoIP calls can ring" />
+        </service>
+
+        <receiver
+            android:name=".service.BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <meta-data
             android:name="firebase_messaging_auto_init_enabled"

@@ -267,13 +267,6 @@ fun FcmPushSection(
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text("Fetch Token", fontSize = 12.sp)
                                 }
-                                OutlinedButton(
-                                    onClick = onGenerateTestToken,
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.weight(1f).testTag("btn_generate_test_token")
-                                ) {
-                                    Text("Generate Test Token", fontSize = 12.sp)
-                                }
                             }
                         }
                     }

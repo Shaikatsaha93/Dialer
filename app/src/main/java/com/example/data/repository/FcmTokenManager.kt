@@ -20,23 +20,23 @@ class FcmTokenManager(private val context: Context) {
     private val prefs = context.getSharedPreferences("fcm_token_prefs", Context.MODE_PRIVATE)
     private val scope = CoroutineScope(Dispatchers.IO)
 
-    // Load or generate persistent device registration token
-    private val initialToken: String = prefs.getString(KEY_FCM_TOKEN, null) ?: run {
-        val generated = "fcm_token_fir_7eb9d_" + java.util.UUID.randomUUID().toString().replace("-", "").take(28)
-        prefs.edit().putString(KEY_FCM_TOKEN, generated).apply()
-        generated
-    }
-
-    private val _fcmToken = MutableStateFlow<String?>(initialToken)
+    // Last real token Firebase gave us (never a made-up one: a fake token can never receive a push)
+    private val _fcmToken = MutableStateFlow(
+        prefs.getString(KEY_FCM_TOKEN, null)?.takeUnless { it.startsWith(FAKE_TOKEN_PREFIX) }
+    )
     val fcmToken: StateFlow<String?> = _fcmToken.asStateFlow()
 
-    private val _tokenStatus = MutableStateFlow("Active • Ready for Background Push")
+    private val _tokenStatus = MutableStateFlow("Fetching FCM token...")
     val tokenStatus: StateFlow<String> = _tokenStatus.asStateFlow()
 
     private val _receivedPushes = MutableStateFlow<List<PushMessageItem>>(emptyList())
     val receivedPushes: StateFlow<List<PushMessageItem>> = _receivedPushes.asStateFlow()
 
     fun initialize() {
+        // Drop a fake token saved by older versions
+        if (prefs.getString(KEY_FCM_TOKEN, null)?.startsWith(FAKE_TOKEN_PREFIX) == true) {
+            prefs.edit().remove(KEY_FCM_TOKEN).apply()
+        }
         ensureFirebaseInitialized()
         fetchLiveTokenInBackground()
     }
@@ -55,9 +55,6 @@ class FcmTokenManager(private val context: Context) {
                 FirebaseApp.initializeApp(context, options)
                 Log.d(TAG, "FirebaseApp initialized with explicit options")
             }
-            try {
-                FirebaseMessaging.getInstance().isAutoInitEnabled = false
-            } catch (_: Throwable) {}
         } catch (e: Throwable) {
             Log.w(TAG, "Explicit FirebaseApp init notice: ${e.message}")
         }
@@ -69,30 +66,29 @@ class FcmTokenManager(private val context: Context) {
             try {
                 val gmsAvailability = GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(context)
                 if (gmsAvailability != ConnectionResult.SUCCESS) {
-                    Log.d(TAG, "Google Play Services not connected ($gmsAvailability). Using persistent device FCM token.")
-                    _tokenStatus.value = "Active • Ready for Background Push"
+                    Log.w(TAG, "Google Play Services unavailable ($gmsAvailability): no FCM push on this device")
+                    _tokenStatus.value = "Unavailable • Google Play Services missing"
                     return@launch
                 }
 
                 FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
-                    if (task.isSuccessful) {
-                        val token = task.result
-                        if (!token.isNullOrBlank()) {
-                            Log.d(TAG, "FCM Live Device Token retrieved: $token")
-                            saveToken(token)
-                        }
+                    val token = if (task.isSuccessful) task.result else null
+                    if (!token.isNullOrBlank()) {
+                        Log.d(TAG, "FCM token: $token")
+                        saveToken(token)
                     } else {
-                        val exception = task.exception
-                        val errorMsg = exception?.localizedMessage ?: exception?.message ?: "Check pending"
-                        Log.d(TAG, "FCM live fetch notice: $errorMsg (keeping persistent active token)")
-                        if (_fcmToken.value != null) {
-                            _tokenStatus.value = "Active • Ready for Background Push"
+                        val errorMsg = task.exception?.localizedMessage ?: "unknown error"
+                        Log.w(TAG, "FCM token fetch failed: $errorMsg")
+                        _tokenStatus.value = if (_fcmToken.value != null) {
+                            "Active • Using last token (refresh failed: $errorMsg)"
+                        } else {
+                            "Failed • $errorMsg"
                         }
                     }
                 }
             } catch (e: Throwable) {
-                Log.d(TAG, "FirebaseMessaging note: ${e.message}")
-                _tokenStatus.value = "Active • Ready for Background Push"
+                Log.w(TAG, "FirebaseMessaging error: ${e.message}")
+                _tokenStatus.value = "Failed • ${e.message}"
             }
         }
     }
@@ -103,34 +99,13 @@ class FcmTokenManager(private val context: Context) {
 
     fun saveToken(token: String) {
         _fcmToken.value = token
-        _tokenStatus.value = "Active • Ready for Background Push"
+        _tokenStatus.value = "Active • Real FCM token"
         prefs.edit().putString(KEY_FCM_TOKEN, token).apply()
     }
 
     fun refreshToken() {
-        scope.launch {
-            _tokenStatus.value = "Refreshing FCM token..."
-            ensureFirebaseInitialized()
-            try {
-                val gmsAvailability = GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(context)
-                if (gmsAvailability == ConnectionResult.SUCCESS) {
-                    FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
-                        if (task.isSuccessful && !task.result.isNullOrBlank()) {
-                            saveToken(task.result)
-                        } else {
-                            val newToken = "fcm_token_fir_7eb9d_" + java.util.UUID.randomUUID().toString().replace("-", "").take(28)
-                            saveToken(newToken)
-                        }
-                    }
-                } else {
-                    val newToken = "fcm_token_fir_7eb9d_" + java.util.UUID.randomUUID().toString().replace("-", "").take(28)
-                    saveToken(newToken)
-                }
-            } catch (e: Exception) {
-                val newToken = "fcm_token_fir_7eb9d_" + java.util.UUID.randomUUID().toString().replace("-", "").take(28)
-                saveToken(newToken)
-            }
-        }
+        _tokenStatus.value = "Refreshing FCM token..."
+        fetchLiveTokenInBackground()
     }
 
     fun recordPushMessage(item: PushMessageItem) {
@@ -142,13 +117,9 @@ class FcmTokenManager(private val context: Context) {
         _receivedPushes.value = emptyList()
     }
 
-    fun generateTestToken() {
-        val testToken = "fcm_token_fir_7eb9d_" + java.util.UUID.randomUUID().toString().replace("-", "").take(28)
-        saveToken(testToken)
-    }
-
     companion object {
         private const val TAG = "FcmTokenManager"
         private const val KEY_FCM_TOKEN = "key_cached_fcm_token"
+        private const val FAKE_TOKEN_PREFIX = "fcm_token_fir_7eb9d_"
     }
 }

@@ -19,3 +19,8 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# Linphone: its native code calls back into these Java classes by name (JNI),
+# so keep the whole SDK wrapper intact.
+-keep class org.linphone.** { *; }
+-dontwarn org.linphone.**

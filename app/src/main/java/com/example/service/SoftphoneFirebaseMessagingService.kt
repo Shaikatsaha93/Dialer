@@ -85,9 +85,16 @@ class SoftphoneFirebaseMessagingService : FirebaseMessagingService() {
         }
 
         if (isVoipCallPush && settings?.fcmVoipWakeup != false) {
-            // Wake up softphone and trigger incoming call UI
+            // The push only wakes us up. The call itself is the SIP INVITE the switch sends once
+            // we are registered again; it rings through the normal incoming-call path.
+            // A high-priority FCM message lets us start the foreground service from the background.
             try {
-                SoftphoneApp.instance.sipManager.simulateIncomingCall(callerUri, callerName)
+                SipForegroundService.startStandby(this)
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not start standby service from push: ${e.message}")
+            }
+            try {
+                SoftphoneApp.instance.sipManager.onPushWakeup()
             } catch (e: Exception) {
                 Log.e(TAG, "Error waking softphone for VoIP call push: ${e.message}")
                 showSystemNotification(title, body, isVoipCall = true)
