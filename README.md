@@ -12,11 +12,13 @@ It registers to a SIP server (tested with **iTelSwitchPlus 8.0.0**), places and 
 - **3-way conference:** add a second party during a call. The call is mixed on the phone by Linphone's local conference. You can remove participants or leave and rejoin the conference.
 - **Account balance:** reads the prepaid balance that iTelSwitchPlus sends on every registration and shows it on the dialer status card. It refreshes about once a minute and after every call, and turns red below 5.
 - **Multiple SIP accounts** stored locally with Room. One account is active at a time.
-- **Call history:** incoming, outgoing and missed calls, with a filter.
+- **Call history:** incoming, outgoing and missed calls, with a filter. Each call is saved once, with the right direction.
 - **Device contacts:** search contacts and dial or add them to a call.
 - **Android Telecom integration** through a self-managed `ConnectionService`, a foreground service and an ongoing-call notification with Hang up, Mute and Speaker actions.
-- **Background operation:** wake lock and Wi-Fi lock during calls, lock-screen display, optional auto-answer.
-- **Firebase Cloud Messaging:** receives push messages. A push with `type=call` (or a `caller_uri` field) shows the incoming-call screen.
+- **Rings in the background:** a standby service keeps the SIP account registered with the screen off, in Doze and in battery saver, on Wi-Fi or mobile data. It starts again by itself after a reboot or an app update. Incoming calls open a full-screen call screen over the lock screen. See [Receiving calls in the background](#receiving-calls-in-the-background).
+- **Firebase Cloud Messaging:** a call push wakes the app and re-registers the SIP account so the real call can ring. Only real FCM tokens are shown. See [Push notifications (FCM)](#push-notifications-fcm).
+- **Small APK:** the release build is about 31 MB (it was 150 MB). See [APK size](#apk-size).
+- **Other:** optional auto-answer, wake lock and Wi-Fi lock during calls.
 - **Glass design:** frosted-glass panels on a soft gradient backdrop, a floating tab bar, and Apple iOS system colors. Works in light and dark mode.
 - **Settings:** echo cancellation, adaptive rate control, mic gain, STUN, IPv6, keep-alive, theme (System, Light or Dark).
 - **Diagnostics:** in-app SIP log viewer. SDK logs are also mirrored to logcat under the `LinphoneSdk` tag.
@@ -39,7 +41,8 @@ It registers to a SIP server (tested with **iTelSwitchPlus 8.0.0**), places and 
 app/src/main/java/com/example/
 ├── sip/            SipManager: Linphone core, registration, calls, conference, balance
 ├── telecom/        ConnectionService and PhoneAccount registration
-├── service/        Foreground call service, FCM messaging service
+├── service/        Standby/call foreground service, FCM service, boot receiver,
+│                   battery and full-screen permission checks
 ├── data/
 │   ├── model/      CallState, SipAccount, AccountBalance, AppSettings, …
 │   ├── local/      Room database and DAOs
@@ -133,6 +136,78 @@ When registration succeeds, the dialer shows **SIP Online • Ready to Call** an
 
 A is not put on SIP hold while B rings; see the server notes below for why.
 
+## Receiving calls in the background
+
+The app rings without being open: with the screen off, in Doze, in battery saver, and on Wi-Fi or mobile data.
+
+**How it works**
+
+- **Standby service.** While **Keep App Running in Background** is on (the default), a foreground service shows the *SIP Softphone Standby* notification and keeps the account registered. It keeps running after a call ends.
+- **Service type.** When idle, the service runs as `specialUse`. While a call rings or is active, it switches to `phoneCall`. Android 15 and newer do not allow a `phoneCall` service to start at boot.
+- **Reboot and update.** `BootReceiver` starts the standby service after `BOOT_COMPLETED` and after an app update, so the user does not have to open the app.
+- **Keepalive.** A small UDP keepalive is sent every 20 seconds. Mobile-carrier NATs often drop an idle UDP mapping after about 30 seconds, and the switch's INVITE would then never reach the phone. The switch also asks for a re-REGISTER about every minute.
+- **Lock screen.** An incoming call uses a full-screen notification, so the call screen opens over the lock screen like WhatsApp instead of showing only a banner.
+
+On a Pixel 7 Pro (Android 17), forced into deep Doze with battery saver on, the registration was still refreshed with `200 OK` every 54 seconds.
+
+**What the phone must allow**
+
+**Settings → Background & Lock Screen** shows a status card with a green tick or a red warning and an **Allow** button for each item:
+
+| Permission | Why |
+|---|---|
+| Battery optimization: *Unrestricted* | Otherwise Doze can cut the app's network and the phone may stop the app. The app asks once on first start. |
+| Full-screen incoming call | Otherwise a locked phone shows only a small banner. |
+
+On Xiaomi, Oppo, Vivo, Realme and Samsung phones, also turn on **Autostart** or **Allow background activity** in the app's App info. These phones stop background apps more aggressively than stock Android.
+
+**Limitation.** If the user taps **Force stop** in App info, Android does not let the app start again until it is opened by hand. To ring even in that state, the SIP server must send an FCM push (next section).
+
+## Push notifications (FCM)
+
+The app is ready to be woken by a push. The push itself has to come from the server side, because only the switch knows when a call arrives.
+
+**What the app does with a push**
+
+A data message is treated as a call push if it has `type=call` (or `incoming_call`), `action=call`, `caller_uri`, `caller` or `pn_sip_call_id`. On a call push the app:
+
+1. starts the standby service (a high-priority FCM message allows this from the background);
+2. re-registers the SIP account if it is not registered;
+3. waits for the switch's real INVITE, which rings through the normal incoming-call path.
+
+The push does not create a call by itself.
+
+Any other push is shown as a normal notification. Both switches are in **Settings → Push Notifications (FCM)**.
+
+**Example push** (FCM HTTP v1, must be a *data* message with high priority):
+
+```json
+{
+  "message": {
+    "token": "<device FCM token>",
+    "android": { "priority": "high" },
+    "data": { "type": "call", "caller_uri": "sip:01XXXXXXXXX@203.76.101.50", "caller_name": "Customer" }
+  }
+}
+```
+
+**What the server side needs**
+
+- The device's FCM token. The token is shown in the app. It is not yet sent to any server.
+- Something that sends the push when a call comes in for this account. This can be the switch itself (RFC 8599 push parameters in the REGISTER `Contact`), a push proxy such as Flexisip in front of it, or a webhook.
+- The switch must hold or retry the INVITE for a few seconds until the phone has registered again.
+
+Ask your provider whether iTelSwitchPlus supports FCM or RFC 8599 push. Until it does, the standby service above is what keeps incoming calls working.
+
+## APK size
+
+The release APK is about **31 MB** (it was about 150 MB):
+
+- **R8** minifies and shrinks code and resources. `proguard-rules.pro` keeps `org.linphone.**`, because the native library calls those classes through JNI.
+- **ABIs:** release builds include only `arm64-v8a` and `armeabi-v7a` (real phones). Debug builds include `arm64-v8a` and `x86_64` for the emulator. Linphone's native code is about 30 MB per ABI.
+- **Compressed native libraries** (`jniLibs.useLegacyPackaging = true`). Android extracts them once at install time.
+- **Unused dependencies removed:** Retrofit, Moshi, OkHttp, Firebase AI and App Check. They are commented out in `app/build.gradle.kts` so they are easy to add back.
+
 ## Notes for iTelSwitchPlus servers
 
 These behaviours were found in SIP traces and shaped the implementation:
@@ -154,4 +229,5 @@ These behaviours were found in SIP traces and shaped the implementation:
   adb logcat -s LinphoneSipManager LinphoneSdk
   ```
   During a conference, `[Conf Stats]` lines appear every 2 seconds with each leg's codec, direction and bandwidth. `in=0.0kbps` on a leg means that party's audio is not reaching the phone.
+- **Calls are missed when the phone is locked.** Open **Settings → Background & Lock Screen** and make sure both items show a green tick. Check that the *SIP Softphone Standby* notification is present. On Xiaomi, Oppo, Vivo, Realme and Samsung phones also allow Autostart.
 - **Registration fails.** The Settings screen shows the SIP error code: 401/407 for wrong credentials, 403 for a forbidden or blocked account, 404 for an unknown user, 408 for an unreachable server.
