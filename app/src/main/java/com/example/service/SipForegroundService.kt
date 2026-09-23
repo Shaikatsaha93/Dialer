@@ -293,13 +293,16 @@ class SipForegroundService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
+        // Idle standby goes to a silent channel so it does not pop up on every app start;
+        // calls stay on the high-importance channel (heads-up / full screen)
+        val isCall = isOngoingCall || isIncoming
+        val builder = NotificationCompat.Builder(this, if (isCall) CHANNEL_ID else CHANNEL_STANDBY_ID)
             .setContentTitle(title)
             .setContentText(text)
             .setSmallIcon(android.R.drawable.sym_call_outgoing)
             .setContentIntent(openAppPendingIntent)
             .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setPriority(if (isCall) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_LOW)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setCategory(NotificationCompat.CATEGORY_CALL)
 
@@ -351,8 +354,18 @@ class SipForegroundService : Service() {
                 setSound(null, null)
                 lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             }
+            val standbyChannel = NotificationChannel(
+                CHANNEL_STANDBY_ID,
+                "SIP Standby (background)",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Silent notification while the app waits for incoming calls"
+                setSound(null, null)
+                setShowBadge(false)
+            }
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.createNotificationChannel(channel)
+            manager.createNotificationChannel(standbyChannel)
         }
     }
 
@@ -372,6 +385,7 @@ class SipForegroundService : Service() {
     companion object {
         private const val TAG = "SipForegroundService"
         const val CHANNEL_ID = "softphone_active_call_channel"
+        const val CHANNEL_STANDBY_ID = "softphone_standby_channel"
         const val NOTIFICATION_ID = 2001
 
         const val ACTION_START_SERVICE = "com.example.softphone.START_CALL_SERVICE"

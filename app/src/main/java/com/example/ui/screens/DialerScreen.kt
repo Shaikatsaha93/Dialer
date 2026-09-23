@@ -360,7 +360,8 @@ private fun AccountStatusBar(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = if (activeAccount != null) {
-                        "${activeAccount.username}@${activeAccount.domain}"
+                        // Just the number; the server address is not useful to the agent
+                        activeAccount.username.trim().removePrefix("sip:").substringBefore("@")
                     } else {
                         "No SIP Account (Tap to setup)"
                     },
@@ -478,7 +479,7 @@ private fun NumberDisplayField(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                text = if (dialerInput.isEmpty()) "Enter number or SIP URI" else dialerInput,
+                text = if (dialerInput.isEmpty()) "Enter Number" else dialerInput,
                 fontSize = if (dialerInput.length > 15) 20.sp else if (dialerInput.length > 10) 24.sp else 28.sp,
                 fontWeight = FontWeight.Bold,
                 color = if (dialerInput.isEmpty()) {
