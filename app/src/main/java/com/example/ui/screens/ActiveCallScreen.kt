@@ -465,21 +465,30 @@ fun ActiveCallScreen(
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
+                                val line2Waiting = !secondaryCall.isConnected || secondaryCall.isOnHold
                                 Text(
-                                    text = if (secondaryCall.isOnHold) "On Hold" else "Connected / In Call",
+                                    text = when {
+                                        !secondaryCall.isConnected -> "Ringing… (merge after answer)"
+                                        secondaryCall.isOnHold -> "On Hold"
+                                        else -> "Connected / In Call"
+                                    },
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = if (secondaryCall.isOnHold) Color(0xFFE65100) else Color(0xFF2E7D32),
+                                    color = if (line2Waiting) Color(0xFFE65100) else Color(0xFF2E7D32),
                                     fontWeight = FontWeight.Bold
                                 )
                             }
                             Surface(
                                 shape = RoundedCornerShape(6.dp),
-                                color = if (secondaryCall.isOnHold) Color(0xFFFFECB3) else Color(0xFFC8E6C9)
+                                color = if (!secondaryCall.isConnected || secondaryCall.isOnHold) Color(0xFFFFECB3) else Color(0xFFC8E6C9)
                             ) {
                                 Text(
-                                    text = if (secondaryCall.isOnHold) "HELD" else "CONNECTED",
+                                    text = when {
+                                        !secondaryCall.isConnected -> "RINGING"
+                                        secondaryCall.isOnHold -> "HELD"
+                                        else -> "CONNECTED"
+                                    },
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = if (secondaryCall.isOnHold) Color(0xFFBF360C) else Color(0xFF1B5E20),
+                                    color = if (!secondaryCall.isConnected || secondaryCall.isOnHold) Color(0xFFBF360C) else Color(0xFF1B5E20),
                                     fontWeight = FontWeight.Bold,
                                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                 )
@@ -494,6 +503,7 @@ fun ActiveCallScreen(
                         ) {
                             ElevatedButton(
                                 onClick = { viewModel.mergeCallsIntoConference() },
+                                enabled = secondaryCall.isConnected,
                                 shape = RoundedCornerShape(10.dp),
                                 colors = ButtonDefaults.elevatedButtonColors(
                                     containerColor = MaterialTheme.colorScheme.primary,

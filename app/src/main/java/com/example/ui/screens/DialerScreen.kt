@@ -55,6 +55,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.data.model.AccountBalance
 import com.example.data.model.AppThemeMode
 import com.example.data.model.CallState
 import com.example.data.model.RegistrationStatus
@@ -76,6 +77,7 @@ fun DialerScreen(
     val dialerInput by viewModel.dialerInput.collectAsStateWithLifecycle()
     val activeAccount by viewModel.activeAccount.collectAsStateWithLifecycle()
     val registrationState by viewModel.registrationState.collectAsStateWithLifecycle()
+    val accountBalance by viewModel.accountBalance.collectAsStateWithLifecycle()
     val callState by viewModel.callState.collectAsStateWithLifecycle()
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
@@ -124,6 +126,7 @@ fun DialerScreen(
                     AccountStatusBar(
                         activeAccount = activeAccount,
                         registrationState = registrationState,
+                        accountBalance = accountBalance,
                         pulseScale = pulseScale,
                         onClick = onNavigateToAccounts
                     )
@@ -210,6 +213,7 @@ fun DialerScreen(
                 AccountStatusBar(
                     activeAccount = activeAccount,
                     registrationState = registrationState,
+                    accountBalance = accountBalance,
                     pulseScale = pulseScale,
                     onClick = onNavigateToAccounts
                 )
@@ -319,6 +323,7 @@ private fun DialerTopBar(
 private fun AccountStatusBar(
     activeAccount: SipAccount?,
     registrationState: RegistrationStatus,
+    accountBalance: AccountBalance?,
     pulseScale: Float,
     onClick: () -> Unit
 ) {
@@ -375,6 +380,28 @@ private fun AccountStatusBar(
                     fontWeight = FontWeight.Medium,
                     color = statusDotColor
                 )
+            }
+
+            if (accountBalance != null && registrationState == RegistrationStatus.REGISTERED) {
+                val low = accountBalance.amount < 5.0
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    modifier = Modifier
+                        .padding(end = 10.dp)
+                        .testTag("dialer_balance")
+                ) {
+                    Text(
+                        text = "Balance",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = accountBalance.formatted,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = if (low) CallActionRed else MaterialTheme.colorScheme.onSurface
+                    )
+                }
             }
 
             Icon(

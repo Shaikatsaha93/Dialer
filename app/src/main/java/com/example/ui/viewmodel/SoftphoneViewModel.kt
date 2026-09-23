@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.SoftphoneApp
+import com.example.data.model.AccountBalance
 import com.example.data.model.AppSettings
 import com.example.data.model.AppThemeMode
 import com.example.data.model.CallLogEntry
@@ -135,6 +136,7 @@ class SoftphoneViewModel(
 
     val registrationState: StateFlow<RegistrationStatus> = sipManager.registrationState
     val registrationMessage: StateFlow<String> = sipManager.registrationMessage
+    val accountBalance: StateFlow<AccountBalance?> = sipManager.accountBalance
     val diagnosticLogs: StateFlow<List<String>> = sipManager.diagnosticLogs
     val callState: StateFlow<CallState> = sipManager.callState
     val callDuration: StateFlow<Long> = sipManager.callDuration

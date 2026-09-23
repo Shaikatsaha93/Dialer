@@ -14,7 +14,9 @@ data class SecondaryCallInfo(
     val uri: String,
     val displayName: String = "",
     val isOnHold: Boolean = true,
-    val durationSeconds: Long = 0L
+    val durationSeconds: Long = 0L,
+    /** True once the 2nd line has answered; only then can it be merged. */
+    val isConnected: Boolean = false
 )
 
 sealed class CallState {

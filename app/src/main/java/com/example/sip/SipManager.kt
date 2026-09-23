@@ -3,6 +3,7 @@ package com.example.sip
 import android.content.Context
 import android.media.AudioManager
 import android.util.Log
+import com.example.data.model.AccountBalance
 import com.example.data.model.AppSettings
 import com.example.data.model.CallState
 import com.example.data.model.ConferenceParticipant
@@ -24,6 +25,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.linphone.core.Account
 import org.linphone.core.Address
+import org.linphone.core.AudioDevice
 import org.linphone.core.AuthInfo
 import org.linphone.core.AuthMethod
 import org.linphone.core.Call
@@ -40,6 +42,7 @@ import org.linphone.core.TransportType
 interface SipManager {
     val registrationState: StateFlow<RegistrationStatus>
     val registrationMessage: StateFlow<String>
+    val accountBalance: StateFlow<AccountBalance?>
     val diagnosticLogs: StateFlow<List<String>>
     val callState: StateFlow<CallState>
     val callDuration: StateFlow<Long>
@@ -88,8 +91,8 @@ class LinphoneSipManager(
     private var currentLinphoneCall: Call? = null
     private var primaryLinphoneCall: Call? = null
     private var secondaryLinphoneCall: Call? = null
-    private var iterateJob: Job? = null
     private var durationTimerJob: Job? = null
+    private var confStatsJob: Job? = null
     private var activeAccountModel: SipAccount? = null
     private var currentSettings: AppSettings = AppSettings()
 
@@ -98,6 +101,9 @@ class LinphoneSipManager(
 
     private val _registrationMessage = MutableStateFlow("Ready to configure account")
     override val registrationMessage: StateFlow<String> = _registrationMessage.asStateFlow()
+
+    private val _accountBalance = MutableStateFlow<AccountBalance?>(null)
+    override val accountBalance: StateFlow<AccountBalance?> = _accountBalance.asStateFlow()
 
     private val _diagnosticLogs = MutableStateFlow<List<String>>(emptyList())
     override val diagnosticLogs: StateFlow<List<String>> = _diagnosticLogs.asStateFlow()
@@ -194,6 +200,15 @@ class LinphoneSipManager(
                 RegistrationState.Ok -> {
                     _registrationState.value = RegistrationStatus.REGISTERED
                     _registrationMessage.value = "Registered successfully"
+                    // iTelSwitchPlus reports the prepaid balance on every REGISTER 200 OK
+                    // (refreshed ~every minute), e.g. "Balance=18.855 ... Currency=BDT"
+                    try {
+                        AccountBalance.parse(account?.getCustomHeader("iTelSwitchPlus"))?.let {
+                            _accountBalance.value = it
+                        }
+                    } catch (e: Throwable) {
+                        Log.w(TAG, "Balance header: ${e.message}")
+                    }
                 }
                 RegistrationState.Progress, RegistrationState.Refreshing -> {
                     _registrationState.value = RegistrationStatus.REGISTERING
@@ -235,6 +250,14 @@ class LinphoneSipManager(
             val remoteDisplayName = call.remoteAddress?.displayName?.ifBlank { null } ?: remoteAddress
             val current = _callState.value
 
+            // While in a conference the SDK re-INVITEs/pauses the member calls itself; those
+            // events must not overwrite the conference state or toggle our hold flag.
+            if (current is CallState.Connected && current.isConference &&
+                handleConferenceCallState(core, call, state, remoteAddress, remoteDisplayName, current)
+            ) {
+                return
+            }
+
             // Detect if this state event belongs to the secondary line / 2nd call
             val isSecondary = (current is CallState.Connected && current.secondaryCall != null &&
                     (call == secondaryLinphoneCall || (primaryLinphoneCall != null && call != primaryLinphoneCall)))
@@ -271,11 +294,13 @@ class LinphoneSipManager(
                             secondaryCall = current.secondaryCall?.copy(
                                 uri = remoteAddress,
                                 displayName = remoteDisplayName,
-                                isOnHold = false
+                                isOnHold = false,
+                                isConnected = true
                             ) ?: SecondaryCallInfo(
                                 uri = remoteAddress,
                                 displayName = remoteDisplayName,
-                                isOnHold = false
+                                isOnHold = false,
+                                isConnected = true
                             )
                         )
                     }
@@ -307,10 +332,12 @@ class LinphoneSipManager(
                 return
             }
 
-            // Primary call handling
-            currentLinphoneCall = call
-            if (primaryLinphoneCall == null) {
-                primaryLinphoneCall = call
+            // Primary call handling (never point at a call that is already over)
+            if (state !in TERMINAL_STATES) {
+                currentLinphoneCall = call
+                if (primaryLinphoneCall == null) {
+                    primaryLinphoneCall = call
+                }
             }
 
             when (state) {
@@ -338,7 +365,10 @@ class LinphoneSipManager(
                     _callState.value = CallState.Outgoing(remoteAddress, remoteDisplayName, isEarlyMediaOrRinging = true)
                 }
                 Call.State.Connected, Call.State.StreamsRunning -> {
-                    startDurationTimer()
+                    // StreamsRunning repeats after every re-INVITE; don't reset the timer each time
+                    if (_callState.value !is CallState.Connected) {
+                        startDurationTimer()
+                    }
                     val existingConnected = _callState.value as? CallState.Connected
                     _callState.value = CallState.Connected(
                         remoteUri = remoteAddress,
@@ -379,9 +409,20 @@ class LinphoneSipManager(
                         return
                     }
 
+                    // Another call is still up (e.g. the last member left after a conference):
+                    // keep it as the active line instead of tearing the UI down.
+                    val others = liveCalls(core, exclude = call)
+                    if (others.isNotEmpty()) {
+                        if (primaryLinphoneCall !in others) {
+                            promoteRemainingCall(others.first())
+                        }
+                        return
+                    }
+
                     val duration = _callDuration.value
                     val wasMissed = (_callState.value is CallState.Incoming)
                     stopDurationTimer()
+                    try { core.isMicEnabled = true } catch (_: Throwable) {}
                     _callState.value = CallState.Disconnected(reason = message.ifBlank { "Call Ended" })
                     currentLinphoneCall = null
                     primaryLinphoneCall = null
@@ -396,6 +437,7 @@ class LinphoneSipManager(
                                 wasMissed = wasMissed
                             )
                         )
+                        refreshBalanceSoon()
                         delay(1200)
                         if (_callState.value is CallState.Disconnected) {
                             _callState.value = CallState.Idle
@@ -410,6 +452,135 @@ class LinphoneSipManager(
                     Log.d(TAG, "Unhandled call state: $state")
                 }
             }
+        }
+    }
+
+    /**
+     * Returns true when the event was fully handled here. Returns false only when the last
+     * conference call ended, so the normal end-of-call flow runs.
+     */
+    private fun handleConferenceCallState(
+        c: Core,
+        call: Call,
+        state: Call.State,
+        remoteAddress: String,
+        remoteDisplayName: String,
+        current: CallState.Connected
+    ): Boolean {
+        if (state !in TERMINAL_STATES) {
+            // A call that got answered after the merge must still be pulled into the mixer
+            val conf = c.conference
+            if (state == Call.State.StreamsRunning && call.conference == null && conf != null) {
+                try {
+                    conf.addParticipant(call)
+                    _diagnosticLogs.value = (_diagnosticLogs.value + "[Conference] $remoteDisplayName answered, added to the mixer").takeLast(50)
+                } catch (e: Throwable) {
+                    Log.w(TAG, "Late add to conference: ${e.message}")
+                }
+            }
+            return true
+        }
+        val others = liveCalls(c, exclude = call)
+        when {
+            others.isEmpty() -> return false
+            others.size == 1 -> {
+                _diagnosticLogs.value = (_diagnosticLogs.value + "[Conference] $remoteDisplayName left. Back to 1-on-1 call.").takeLast(50)
+                promoteRemainingCall(others.first())
+            }
+            else -> {
+                val remaining = current.participants.filterNot { userPart(it.uri) == userPart(remoteAddress) }
+                if (remaining.size != current.participants.size) {
+                    _diagnosticLogs.value = (_diagnosticLogs.value + "[Conference] $remoteDisplayName left the conference").takeLast(50)
+                    _callState.value = current.copy(participants = remaining)
+                }
+            }
+        }
+        return true
+    }
+
+    private fun promoteRemainingCall(remaining: Call) {
+        primaryLinphoneCall = remaining
+        currentLinphoneCall = remaining
+        secondaryLinphoneCall = null
+        if (remaining.state == Call.State.Paused) {
+            try { remaining.resume() } catch (_: Throwable) {}
+        }
+        _isOnHold.value = false
+        val uri = remaining.remoteAddress?.asStringUriOnly() ?: "Unknown"
+        val name = remaining.remoteAddress?.displayName?.ifBlank { null } ?: uri
+        val cur = _callState.value as? CallState.Connected ?: return
+        _callState.value = cur.copy(
+            remoteUri = uri,
+            displayName = name,
+            isOnHold = false,
+            isConference = false,
+            participants = emptyList(),
+            secondaryCall = null
+        )
+    }
+
+    /**
+     * Every 2s while in a conference, logs per leg: codec, direction, RTP in/out kbit/s and loss.
+     * "in 0.0" on a leg means that caller's audio never reaches the mixer.
+     */
+    private fun startConferenceStatsLogger() {
+        confStatsJob?.cancel()
+        confStatsJob = scope.launch {
+            while (isActive && (_callState.value as? CallState.Connected)?.isConference == true) {
+                delay(2000)
+                val c = core ?: break
+                val conf = c.conference
+                val header = "[Conf Stats] conf=${conf?.state} in=${conf?.isIn} members=${conf?.participantCount}"
+                Log.i(TAG, header)
+                _diagnosticLogs.value = (_diagnosticLogs.value + header).takeLast(50)
+                for (call in liveCalls(c)) {
+                    val pt = call.currentParams?.usedAudioPayloadType
+                    val st = call.audioStats
+                    val line = "[Conf Stats] ${userPart(call.remoteAddress?.asStringUriOnly().orEmpty())} " +
+                        "state=${call.state} inConf=${call.conference != null} " +
+                        "codec=${pt?.mimeType}/${pt?.clockRate} pt=${pt?.number} dir=${call.currentParams?.audioDirection} " +
+                        "in=${"%.1f".format(st?.downloadBandwidth ?: 0f)}kbps out=${"%.1f".format(st?.uploadBandwidth ?: 0f)}kbps " +
+                        "loss=${"%.1f".format(st?.receiverLossRate ?: 0f)}%"
+                    Log.i(TAG, line)
+                    _diagnosticLogs.value = (_diagnosticLogs.value + line).takeLast(50)
+                }
+            }
+        }
+    }
+
+    /** Re-REGISTER shortly after a call so the balance header shows the post-call balance. */
+    private fun refreshBalanceSoon() {
+        scope.launch {
+            delay(1500)
+            try { core?.defaultAccount?.refreshRegister() } catch (e: Throwable) { Log.w(TAG, "Balance refresh: ${e.message}") }
+        }
+    }
+
+    private fun liveCalls(c: Core, exclude: Call? = null): List<Call> =
+        c.calls.filter { it != exclude && it.state !in TERMINAL_STATES }
+
+    private fun userPart(uri: String): String =
+        uri.removePrefix("sip:").removePrefix("sips:").substringBefore("@").substringBefore(";")
+
+    /** Routes audio for the active call or conference through Linphone, which owns the audio path. */
+    private fun applyAudioRoute(c: Core, speaker: Boolean) {
+        val playable = c.audioDevices.filter { it.hasCapability(AudioDevice.Capabilities.CapabilityPlay) }
+        val device = if (speaker) {
+            playable.firstOrNull { it.type == AudioDevice.Type.Speaker }
+        } else {
+            val preferred = listOf(
+                AudioDevice.Type.Bluetooth,
+                AudioDevice.Type.Headset,
+                AudioDevice.Type.Headphones,
+                AudioDevice.Type.Earpiece
+            )
+            preferred.firstNotNullOfOrNull { type -> playable.firstOrNull { it.type == type } }
+        } ?: return
+        val conf = c.conference
+        if (conf != null && conf.isIn) {
+            conf.outputAudioDevice = device
+        } else {
+            c.outputAudioDevice = device
         }
     }
 
@@ -429,6 +600,8 @@ class LinphoneSipManager(
                 loggingService.addListener { _, _, level, message ->
                     val line = message.trim()
                     if (line.isNotEmpty()) {
+                        // Mirror SDK logs (SDP, RTP, conference) to logcat so adb can capture them
+                        Log.println(if (level == LogLevel.Error || level == LogLevel.Fatal) Log.ERROR else Log.DEBUG, "LinphoneSdk", line)
                         _diagnosticLogs.value = (_diagnosticLogs.value + "[${level.name}] $line").takeLast(50)
                     }
                 }
@@ -451,12 +624,6 @@ class LinphoneSipManager(
                 config.setInt("video", "automatically_initiate", 0)
                 config.setInt("video", "automatically_accept", 0)
                 config.setString("video", "device", "")
-
-                // Conference audio mixer configuration for Liblinphone
-                config.setInt("sound", "conference_mixer", 1)
-                config.setInt("sound", "conference_audio_mixer", 1)
-                config.setInt("misc", "conference_audio_mixer", 1)
-                config.setInt("audio", "conference_audio_mixer", 1)
             } catch (e: Throwable) {
                 Log.d(TAG, "Config video/sip setup: ${e.message}")
             }
@@ -498,11 +665,44 @@ class LinphoneSipManager(
                 Log.w(TAG, "Transports setup: ${e.message}")
             }
 
+            // Offer only G.711 (+ DTMF). iTelSwitchPlus answers re-INVITEs by echoing the whole
+            // offer instead of picking one codec, so after the conference re-INVITE Linphone
+            // switched that leg to opus while the carrier kept sending PCMU: the caller heard
+            // noise and the other party heard nothing.
+            try {
+                for (pt in newCore.audioPayloadTypes) {
+                    val keep = (pt.mimeType.equals("PCMU", true) || pt.mimeType.equals("PCMA", true) ||
+                        pt.mimeType.equals("telephone-event", true)) && pt.clockRate == 8000
+                    pt.enable(keep)
+                }
+                Log.i(TAG, "Audio codecs: " + newCore.audioPayloadTypes.filter { it.enabled() }
+                    .joinToString { "${it.mimeType}/${it.clockRate}" })
+            } catch (e: Throwable) {
+                Log.w(TAG, "Codec setup: ${e.message}")
+            }
+
+            // Stream hold music to a paused call. Without it no RTP flows while on hold and the
+            // switch (iTelSwitchPlus, ~30s RTP timeout) hangs up the held caller, e.g. line 1
+            // while the agent is still dialing line 2 for a 3-way call.
+            try {
+                val holdMusic = java.io.File(context.filesDir, "share/sounds/linphone/toy-mono.wav")
+                if (holdMusic.exists()) {
+                    newCore.playFile = holdMusic.absolutePath
+                } else {
+                    Log.w(TAG, "Hold music not found at ${holdMusic.absolutePath}")
+                }
+            } catch (e: Throwable) {
+                Log.w(TAG, "Hold music setup: ${e.message}")
+            }
+
+            // The SDK's CoreManager iterates the core on the main thread. The core is not
+            // thread-safe, so never iterate it from another thread as well.
+            newCore.isAutoIterateEnabled = true
+
             newCore.addListener(coreListener)
             newCore.start()
             core = newCore
             applySettings(currentSettings)
-            startIterateLoop()
             Log.i(TAG, "Linphone Core initialized and started successfully.")
             _diagnosticLogs.value = (_diagnosticLogs.value + "[Linphone] Core started successfully").takeLast(50)
         } catch (e: Throwable) {
@@ -529,20 +729,6 @@ class LinphoneSipManager(
             Log.d(TAG, "Applied audio/network settings: AEC=${settings.echoCancellation}, AdaptiveRate=${settings.adaptiveRateControl}, IPv6=${settings.ipv6Enabled}")
         } catch (e: Throwable) {
             Log.w(TAG, "applySettings failed: ${e.message}")
-        }
-    }
-
-    private fun startIterateLoop() {
-        iterateJob?.cancel()
-        iterateJob = scope.launch(Dispatchers.Default) {
-            while (isActive) {
-                try {
-                    core?.iterate()
-                } catch (e: Exception) {
-                    Log.w(TAG, "Exception in core.iterate: ${e.message}")
-                }
-                delay(20)
-            }
         }
     }
 
@@ -699,6 +885,7 @@ class LinphoneSipManager(
         }
         _registrationState.value = RegistrationStatus.UNREGISTERED
         _registrationMessage.value = "Unregistered"
+        _accountBalance.value = null
     }
 
     override fun makeCall(destinationUri: String, displayName: String) {
@@ -869,6 +1056,7 @@ class LinphoneSipManager(
                     call.terminate()
                 }
             } catch (_: Throwable) {}
+            try { c.isMicEnabled = true } catch (_: Throwable) {}
         }
 
         primaryLinphoneCall = null
@@ -887,6 +1075,7 @@ class LinphoneSipManager(
                     wasMissed = wasMissed
                 )
             )
+            refreshBalanceSoon()
             delay(1200)
             _callState.value = CallState.Idle
             _callDuration.value = 0L
@@ -899,8 +1088,11 @@ class LinphoneSipManager(
     override fun toggleMute() {
         val newMute = !_isMuted.value
         _isMuted.value = newMute
-        currentLinphoneCall?.let {
-            it.microphoneMuted = newMute
+        // Core-level mic mute covers a single call and the conference mixer alike;
+        // muting one call only silenced one leg of a conference.
+        val c = core
+        if (c != null) {
+            try { c.isMicEnabled = !newMute } catch (e: Throwable) { Log.w(TAG, "Mic toggle: ${e.message}") }
         }
         updateConnectedStateIfActive()
     }
@@ -909,8 +1101,13 @@ class LinphoneSipManager(
         val newSpeaker = !_isSpeakerOn.value
         _isSpeakerOn.value = newSpeaker
         try {
-            audioManager.isSpeakerphoneOn = newSpeaker
-        } catch (e: Exception) {
+            val c = core
+            if (c != null) {
+                applyAudioRoute(c, newSpeaker)
+            } else {
+                audioManager.isSpeakerphoneOn = newSpeaker
+            }
+        } catch (e: Throwable) {
             Log.w(TAG, "Failed to toggle speakerphone: ${e.message}")
         }
         updateConnectedStateIfActive()
@@ -919,8 +1116,18 @@ class LinphoneSipManager(
     override fun toggleHold() {
         val newHold = !_isOnHold.value
         _isOnHold.value = newHold
-        currentLinphoneCall?.let {
-            if (newHold) it.pause() else it.resume()
+        val conf = core?.conference
+        if ((_callState.value as? CallState.Connected)?.isConference == true && conf != null) {
+            // Holding a conference means stepping out of the mixer; the others keep talking
+            try {
+                if (newHold) conf.leave() else conf.enter()
+            } catch (e: Throwable) {
+                Log.w(TAG, "Conference hold: ${e.message}")
+            }
+        } else {
+            currentLinphoneCall?.let {
+                if (newHold) it.pause() else it.resume()
+            }
         }
         updateConnectedStateIfActive()
     }
@@ -1022,22 +1229,22 @@ class LinphoneSipManager(
                 _callState.value = current.copy(participants = updatedList)
                 _diagnosticLogs.value = (_diagnosticLogs.value + "[Conference] Inviting participant: $effectiveDisplayName ($finalSipUri)").takeLast(50)
 
-                // If Linphone SDK is connected, invite and add to conference
+                // Let the conference place the call itself: it joins the mixer once answered.
+                // (Adding a still-ringing call via addAllToConference broke the mixer.)
                 c?.let { coreInstance ->
                     try {
                         val factory = Factory.instance()
                         val address = factory.createAddress(finalSipUri) ?: coreInstance.interpretUrl(finalSipUri)
                         if (address != null) {
                             val callParams = coreInstance.createCallParams(null)
-                            val newCall = if (callParams != null) {
+                            callParams?.isVideoEnabled = false
+                            val conf = coreInstance.conference
+                            if (conf != null) {
+                                conf.inviteParticipants(arrayOf(address), callParams)
+                            } else if (callParams != null) {
                                 coreInstance.inviteAddressWithParams(address, callParams)
                             } else {
                                 coreInstance.inviteAddress(address)
-                            }
-                            newCall?.let {
-                                try {
-                                    coreInstance.addAllToConference()
-                                } catch (_: Throwable) {}
                             }
                             _diagnosticLogs.value = (_diagnosticLogs.value + "[SIP] Conference INVITE sent to $finalSipUri").takeLast(50)
                         } else {
@@ -1048,8 +1255,12 @@ class LinphoneSipManager(
                         _diagnosticLogs.value = (_diagnosticLogs.value + "[SIP Error] Conference invite error: ${e.message}").takeLast(50)
                     }
                 }
+            } else if (c != null && (primaryLinphoneCall ?: currentLinphoneCall) != null &&
+                startConferenceAndInvite(c, current, finalSipUri, effectiveDisplayName)
+            ) {
+                return
             } else {
-                // Put 1st call on hold, start 2nd call as secondary active call
+                // Fallback: put 1st call on hold, start 2nd call as secondary active call
                 if (primaryLinphoneCall == null) {
                     primaryLinphoneCall = currentLinphoneCall
                 }
@@ -1097,6 +1308,7 @@ class LinphoneSipManager(
                         delay(1500)
                         val cur = _callState.value
                         if (cur is CallState.Connected && cur.secondaryCall != null) {
+                            _callState.value = cur.copy(secondaryCall = cur.secondaryCall.copy(isConnected = true))
                             _diagnosticLogs.value = (_diagnosticLogs.value + "[Line 2] Connected (Simulated). 2 calls active. Merge option ready.").takeLast(50)
                         }
                     }
@@ -1105,10 +1317,88 @@ class LinphoneSipManager(
         }
     }
 
+    /**
+     * 3-way call without SIP hold: the switch (iTelSwitchPlus) hangs up any call that stays
+     * on hold (sendonly) for ~30s, even with hold music. So line 1 goes straight into a local
+     * conference (stays sendrecv) and line 2 is invited into it; it joins the mixer on answer.
+     * Returns false if the conference could not be set up, so the caller falls back to hold.
+     */
+    private fun startConferenceAndInvite(
+        c: Core,
+        current: CallState.Connected,
+        finalSipUri: String,
+        displayName: String
+    ): Boolean {
+        val first = primaryLinphoneCall ?: currentLinphoneCall ?: return false
+        return try {
+            val address = Factory.instance().createAddress(finalSipUri) ?: c.interpretUrl(finalSipUri) ?: return false
+
+            var conf = c.conference
+            if (conf == null) {
+                val confParams = c.createConferenceParams(null)
+                confParams.isAudioEnabled = true
+                confParams.isVideoEnabled = false
+                confParams.isLocalParticipantEnabled = true
+                // Keep the conference alive while line 2 is still ringing (only line 1 inside)
+                confParams.isOneParticipantConferenceEnabled = true
+                conf = c.createConferenceWithParams(confParams)
+            }
+            if (conf == null) return false
+
+            if (first.conference == null) {
+                conf.addParticipant(first)
+            }
+            if (!conf.isIn) {
+                conf.enter()
+            }
+
+            val callParams = c.createCallParams(null)
+            callParams?.isVideoEnabled = false
+            conf.inviteParticipants(arrayOf(address), callParams)
+
+            try { c.isMicEnabled = !_isMuted.value } catch (_: Throwable) {}
+            try { applyAudioRoute(c, _isSpeakerOn.value) } catch (_: Throwable) {}
+
+            _isOnHold.value = false
+            _callState.value = current.copy(
+                isConference = true,
+                isOnHold = false,
+                secondaryCall = null,
+                participants = listOf(
+                    ConferenceParticipant(
+                        id = "conf_p_1",
+                        uri = current.remoteUri,
+                        displayName = current.displayName.ifBlank { userPart(current.remoteUri) },
+                        joinedAtSeconds = 0L
+                    ),
+                    ConferenceParticipant(
+                        id = "conf_p_${System.currentTimeMillis()}",
+                        uri = finalSipUri,
+                        displayName = displayName,
+                        joinedAtSeconds = _callDuration.value
+                    )
+                )
+            )
+            _diagnosticLogs.value = (_diagnosticLogs.value + "[Conference] Line 1 kept live in conference, inviting $displayName ($finalSipUri)").takeLast(50)
+            startConferenceStatsLogger()
+            true
+        } catch (e: Throwable) {
+            Log.e(TAG, "Start conference and invite: ${e.message}", e)
+            _diagnosticLogs.value = (_diagnosticLogs.value + "[Conference Error] ${e.message}. Falling back to hold + merge.").takeLast(50)
+            false
+        }
+    }
+
     override fun mergeCallsIntoConference() {
         val current = _callState.value
         if (current is CallState.Connected && current.secondaryCall != null) {
             val sec = current.secondaryCall
+            // A still-ringing call cannot join the mixer: it would end up outside the
+            // conference once answered and nobody would hear anybody.
+            if (!sec.isConnected) {
+                _diagnosticLogs.value = (_diagnosticLogs.value + "[Conference] Line 2 has not answered yet. Merge after it connects.").takeLast(50)
+                return
+            }
             val p1 = ConferenceParticipant(
                 id = "conf_p_1",
                 uri = current.remoteUri,
@@ -1136,93 +1426,40 @@ class LinphoneSipManager(
 
             core?.let { c ->
                 try {
-                    // 1. Ensure local conference is created with audio enabled
-                    if (c.conference == null) {
-                        try {
-                            val confParams = c.createConferenceParams(null)
-                            confParams?.isAudioEnabled = true
-                            confParams?.isVideoEnabled = false
-                            c.createConferenceWithParams(confParams)
-                        } catch (e: Throwable) {
-                            Log.w(TAG, "Conference params creation: ${e.message}")
-                        }
+                    // Do NOT resume held calls by hand first: resuming one call makes Linphone
+                    // pause the other, and those competing re-INVITEs race with the merge and
+                    // leave legs half-paused (choppy / one-way audio). addParticipants() takes
+                    // care of un-holding each call inside the conference.
+                    val calls = liveCalls(c).filter { it.conference == null }
+                    Log.i(TAG, "Merging ${calls.size} calls into conference")
+
+                    var conf = c.conference
+                    if (conf == null) {
+                        val confParams = c.createConferenceParams(null)
+                        confParams.isAudioEnabled = true
+                        confParams.isVideoEnabled = false
+                        confParams.isLocalParticipantEnabled = true
+                        conf = c.createConferenceWithParams(confParams)
+                    }
+                    if (conf == null) {
+                        _diagnosticLogs.value = (_diagnosticLogs.value + "[Conference Error] Could not create local conference").takeLast(50)
+                        return
                     }
 
-                    val conf = c.conference
-                    val allCalls = c.calls
-                    Log.i(TAG, "Merging ${allCalls.size} calls into conference")
-
-                    // 2. Unpause calls first if paused so audio streams are active
-                    primaryLinphoneCall?.let { pCall ->
-                        if (pCall.state == Call.State.Paused) {
-                            try { pCall.resume() } catch (_: Throwable) {}
-                        }
-                    }
-                    secondaryLinphoneCall?.let { sCall ->
-                        if (sCall.state == Call.State.Paused) {
-                            try { sCall.resume() } catch (_: Throwable) {}
-                        }
-                    }
-                    for (cCall in allCalls) {
-                        if (cCall.state == Call.State.Paused) {
-                            try { cCall.resume() } catch (_: Throwable) {}
-                        }
+                    conf.addParticipants(calls.toTypedArray())
+                    if (!conf.isIn) {
+                        conf.enter()
                     }
 
-                    // 3. Add all calls to conference
-                    try {
-                        c.addAllToConference()
-                    } catch (e: Throwable) {
-                        Log.w(TAG, "addAllToConference error: ${e.message}")
-                    }
+                    // Keep the user's current mute / speaker choice for the mixer's local leg
+                    try { c.isMicEnabled = !_isMuted.value } catch (_: Throwable) {}
+                    try { applyAudioRoute(c, _isSpeakerOn.value) } catch (_: Throwable) {}
 
-                    for (call in allCalls) {
-                        try {
-                            if (call.conference == null) {
-                                if (conf != null) {
-                                    conf.addParticipant(call)
-                                } else {
-                                    c.addToConference(call)
-                                }
-                            }
-                        } catch (e: Throwable) {
-                            Log.w(TAG, "addParticipant call error: ${e.message}")
-                        }
-                    }
-
-                    // 4. CRITICAL: Enter conference so local audio/microphone connects to the conference mixer!
-                    try {
-                        c.conference?.enter()
-                    } catch (e: Throwable) {
-                        Log.w(TAG, "conference.enter: ${e.message}")
-                    }
-                    try {
-                        c.enterConference()
-                    } catch (_: Throwable) {}
-
-                    // 5. Connect audio devices to the conference
-                    try {
-                        c.defaultInputAudioDevice?.let { inDev ->
-                            c.conference?.inputAudioDevice = inDev
-                        }
-                        c.defaultOutputAudioDevice?.let { outDev ->
-                            c.conference?.outputAudioDevice = outDev
-                        }
-                    } catch (e: Throwable) {
-                        Log.w(TAG, "Audio device conference routing: ${e.message}")
-                    }
-
-                    // 6. Ensure all participants and core microphone are unmuted
-                    _isMuted.value = false
-                    try { c.isMicEnabled = true } catch (_: Throwable) {}
-                    for (call in allCalls) {
-                        try {
-                            call.microphoneMuted = false
-                        } catch (_: Throwable) {}
-                    }
-                    _diagnosticLogs.value = (_diagnosticLogs.value + "[Conference Audio] Mixer connected & unmuted for all participants.").takeLast(50)
+                    _diagnosticLogs.value = (_diagnosticLogs.value + "[Conference Audio] ${calls.size} calls added to the mixer").takeLast(50)
+                    startConferenceStatsLogger()
                 } catch (e: Throwable) {
-                    Log.e(TAG, "Linphone addAllToConference: ${e.message}", e)
+                    Log.e(TAG, "Linphone merge into conference: ${e.message}", e)
+                    _diagnosticLogs.value = (_diagnosticLogs.value + "[Conference Error] ${e.message}").takeLast(50)
                 }
             }
         }
@@ -1231,8 +1468,22 @@ class LinphoneSipManager(
     override fun removeParticipantFromConference(participantId: String) {
         val current = _callState.value
         if (current is CallState.Connected && current.isConference) {
+            val removed = current.participants.firstOrNull { it.id == participantId }
             val updated = current.participants.filterNot { it.id == participantId }
             _diagnosticLogs.value = (_diagnosticLogs.value + "[Conference] Participant removed: $participantId").takeLast(50)
+
+            // Actually drop that caller's SIP leg; otherwise they stay in the audio mix
+            val c = core
+            if (removed != null && c != null) {
+                val target = liveCalls(c).firstOrNull {
+                    userPart(it.remoteAddress?.asStringUriOnly().orEmpty()) == userPart(removed.uri)
+                }
+                try {
+                    target?.terminate()
+                } catch (e: Throwable) {
+                    Log.w(TAG, "Terminate conference participant: ${e.message}")
+                }
+            }
 
             if (updated.size <= 1) {
                 val remaining = updated.firstOrNull()
@@ -1274,7 +1525,8 @@ class LinphoneSipManager(
                 uri = current.remoteUri,
                 displayName = current.displayName,
                 isOnHold = true,
-                durationSeconds = current.durationSeconds
+                durationSeconds = current.durationSeconds,
+                isConnected = true
             )
             _callState.value = current.copy(
                 remoteUri = newPrimaryUri,
@@ -1353,5 +1605,6 @@ class LinphoneSipManager(
 
     companion object {
         private const val TAG = "LinphoneSipManager"
+        private val TERMINAL_STATES = setOf(Call.State.End, Call.State.Released, Call.State.Error)
     }
 }
