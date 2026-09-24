@@ -1,5 +1,6 @@
 package com.example
 
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
@@ -14,6 +15,8 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.AppThemeMode
 import com.example.data.model.CallState
@@ -29,11 +32,15 @@ class MainActivity : ComponentActivity() {
 
     private val viewModel: SoftphoneViewModel by viewModels { SoftphoneViewModel.Factory }
 
+    /** Set when opened from a "new access request" notification. */
+    private var openAdminRequest by mutableStateOf(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
         configureLockScreenFlags()
+        openAdminRequest = intent?.getBooleanExtra(EXTRA_OPEN_ADMIN, false) == true
 
         setContent {
             val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
@@ -88,7 +95,11 @@ class MainActivity : ComponentActivity() {
 
             SoftphoneTheme(darkTheme = isDarkTheme) {
                 if (license is LicenseState.Approved) {
-                    SoftphoneMainScreen(viewModel = viewModel)
+                    SoftphoneMainScreen(
+                        viewModel = viewModel,
+                        openAdminRequest = openAdminRequest,
+                        onAdminOpened = { openAdminRequest = false }
+                    )
                 } else {
                     val licenseManager = SoftphoneApp.instance.licenseManager
                     LicenseScreen(
@@ -116,6 +127,12 @@ class MainActivity : ComponentActivity() {
         } catch (_: Exception) {}
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.getBooleanExtra(EXTRA_OPEN_ADMIN, false)) openAdminRequest = true
+    }
+
     override fun onStart() {
         super.onStart()
         // A blocked/offline install re-checks each time the app is opened
@@ -137,5 +154,8 @@ class MainActivity : ComponentActivity() {
             )
         }
     }
-}
 
+    companion object {
+        const val EXTRA_OPEN_ADMIN = "open_admin"
+    }
+}

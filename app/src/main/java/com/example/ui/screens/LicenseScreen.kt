@@ -28,6 +28,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -43,6 +44,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.data.repository.LicenseState
+import com.example.ui.components.AdminSignInDialog
 import com.example.ui.theme.CallActionRed
 import com.example.ui.theme.GlassBackground
 import com.example.ui.theme.LocalGlassColors
@@ -56,6 +58,9 @@ fun LicenseScreen(
     onSubmit: (name: String, phone: String, onResult: (String?) -> Unit) -> Unit,
     onRetry: () -> Unit
 ) {
+    var showAdminSignIn by rememberSaveable { mutableStateOf(false) }
+    if (showAdminSignIn) AdminSignInDialog(onDismiss = { showAdminSignIn = false })
+
     GlassBackground {
         Box(
             modifier = Modifier
@@ -111,6 +116,9 @@ fun LicenseScreen(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+                TextButton(onClick = { showAdminSignIn = true }, modifier = Modifier.testTag("btn_license_admin")) {
+                    Text("Admin sign in", style = MaterialTheme.typography.labelMedium)
                 }
             }
         }

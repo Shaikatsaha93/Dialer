@@ -76,6 +76,7 @@ import com.example.data.model.AppThemeMode
 import com.example.data.model.RegistrationStatus
 import com.example.data.model.SipAccount
 import com.example.data.model.SipTransport
+import com.example.ui.components.AdminAccessCard
 import com.example.ui.components.AccountCard
 import com.example.ui.components.FcmPushSection
 import com.example.ui.components.ThemeModeSelector
@@ -248,6 +249,8 @@ fun AccountConfigScreen(
                             viewModel.simulatePushNotification(title, body, isVoip, callerUri, callerName)
                         }
                     )
+
+                    AdminAccessCard()
                 }
             }
         } else {
@@ -364,6 +367,8 @@ fun AccountConfigScreen(
                         viewModel.simulatePushNotification(title, body, isVoip, callerUri, callerName)
                     }
                 )
+
+                AdminAccessCard()
 
                 Spacer(modifier = Modifier.height(16.dp))
             }

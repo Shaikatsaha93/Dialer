@@ -7,6 +7,8 @@ import com.example.data.model.SipAccount
 import com.example.data.model.SipTransport
 import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.Timestamp
+import com.google.firebase.firestore.DocumentReference
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
@@ -20,6 +22,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.util.Date
+import java.util.concurrent.TimeUnit
 
 /** Whether this install may use the app; decided by the admin in Firestore devices/{uid}. */
 sealed class LicenseState {
@@ -40,9 +43,13 @@ sealed class LicenseState {
  *
  * Every install signs in anonymously and gets its own uid. The app may only create
  * devices/{uid} with approved = false; the admin flips the boolean "approved" (a true/false
- * dropdown in the Firebase console, so no typos) and sets an optional expiresAt. The security
- * rules deny reading the record once it is expired, or unapproved while it holds SIP details, so
- * a permission error means "no access".
+ * dropdown in the Firebase console, so no typos). The security rules deny reading the record once
+ * it is expired, or unapproved while it holds SIP details, so a permission error means "no access".
+ *
+ * Subscription without a server: when the admin approves a record that has no expiresAt, the app
+ * writes expiresAt = now + 30 days. When that date has passed, the app sets approved back to false
+ * and removes expiresAt, so the next approval starts a new 30 days. The rules allow exactly these
+ * two writes and nothing else. The admin can still set or extend expiresAt by hand.
  *
  * Optional SIP provisioning: when the approved record has sipUsername, sipPassword and
  * sipDomain (plus optional sipPort, sipDisplayName), that account is saved and made active, and
@@ -60,6 +67,10 @@ class LicenseManager(
 
     private var listener: ListenerRegistration? = null
 
+    /** Signed in with the admin email: always allowed, and sees the Admin tab. */
+    private val _isAdmin = MutableStateFlow(false)
+    val isAdmin: StateFlow<Boolean> = _isAdmin.asStateFlow()
+
     private val auth get() = FirebaseAuth.getInstance()
     private val firestore get() = FirebaseFirestore.getInstance()
 
@@ -70,6 +81,10 @@ class LicenseManager(
             return
         }
         val user = auth.currentUser
+        if (user != null && user.email.equals(ADMIN_EMAIL, ignoreCase = true)) {
+            enterAdminMode()
+            return
+        }
         if (user != null) {
             listen(user.uid)
             return
@@ -84,12 +99,49 @@ class LicenseManager(
 
     /** Re-check, e.g. when the app comes to the foreground after being blocked or offline. */
     fun refresh() {
+        subscriptionWriteTried = false
+        expireWriteTried = false
         listener?.remove()
         listener = null
         start()
     }
 
     val installId: String? get() = auth.currentUser?.uid
+
+    /**
+     * Admin sign-in (Firebase email/password user created in the console). This replaces the
+     * install's anonymous identity; signing out later needs a new access request.
+     */
+    fun signInAdmin(email: String, password: String, onResult: (String?) -> Unit) {
+        if (!email.trim().equals(ADMIN_EMAIL, ignoreCase = true)) {
+            onResult("This email is not the admin account")
+            return
+        }
+        auth.signInWithEmailAndPassword(email.trim(), password)
+            .addOnSuccessListener {
+                enterAdminMode()
+                onResult(null)
+            }
+            .addOnFailureListener { e ->
+                Log.w(TAG, "Admin sign-in failed: ${e.message}")
+                onResult(e.localizedMessage ?: "Sign-in failed")
+            }
+    }
+
+    fun signOutAdmin() {
+        auth.signOut()
+        _isAdmin.value = false
+        prefs.edit().remove(KEY_WAS_APPROVED).apply()
+        _state.value = LicenseState.Checking
+        start()
+    }
+
+    private fun enterAdminMode() {
+        listener?.remove()
+        listener = null
+        _isAdmin.value = true
+        _state.value = LicenseState.Approved(null)
+    }
 
     private fun listen(uid: String) {
         listener?.remove()
@@ -116,9 +168,13 @@ class LicenseManager(
             return
         }
         if (doc.getBoolean("approved") == true) {
-            val expiresAt = doc.getTimestamp("expiresAt")?.toDate()
+            var expiresAt = doc.getTimestamp("expiresAt")?.toDate()
+            if (expiresAt == null) {
+                // Just approved: start the default subscription period
+                expiresAt = startSubscription(doc.reference)
+            }
             // Also checked here: an offline (cached) record would not hit the server rules
-            if (expiresAt != null && expiresAt.before(Date())) {
+            if (expiresAt.before(Date())) {
                 onDenied()
             } else {
                 prefs.edit().putBoolean(KEY_WAS_APPROVED, true).apply()
@@ -136,6 +192,42 @@ class LicenseManager(
     private fun onDenied() {
         _state.value = LicenseState.Denied
         removeProvisionedAccount()
+        markExpired()
+    }
+
+    private var subscriptionWriteTried = false
+    private var expireWriteTried = false
+
+    /** Writes expiresAt = now + [DEFAULT_DAYS] days; returns that date. */
+    private fun startSubscription(ref: DocumentReference): Date {
+        // A few minutes short of 30 days, so a phone clock slightly ahead still passes the rule
+        val expiresAt = Date(System.currentTimeMillis() + TimeUnit.DAYS.toMillis(DEFAULT_DAYS) - TimeUnit.MINUTES.toMillis(5))
+        if (!subscriptionWriteTried) {
+            subscriptionWriteTried = true
+            ref.update(mapOf("expiresAt" to Timestamp(expiresAt), "approvedAt" to FieldValue.serverTimestamp()))
+                .addOnSuccessListener { Log.i(TAG, "Subscription started, expires $expiresAt") }
+                .addOnFailureListener { e -> Log.w(TAG, "Could not start subscription: ${e.message}") }
+        }
+        return expiresAt
+    }
+
+    /**
+     * After expiry, switch approved back to false and clear expiresAt, so the record shows the
+     * real state in the console and the next approval starts a new period. The rules accept this
+     * only when expiresAt has really passed; for a blocked record it just fails.
+     */
+    private fun markExpired() {
+        if (expireWriteTried) return
+        expireWriteTried = true
+        val uid = auth.currentUser?.uid ?: return
+        firestore.collection(COLLECTION).document(uid)
+            .update(mapOf("approved" to false, "expiresAt" to FieldValue.delete()))
+            .addOnSuccessListener {
+                Log.i(TAG, "Subscription expired: approved set to false")
+                // Keep watching, so a new approval unlocks the app right away
+                listen(uid)
+            }
+            .addOnFailureListener { Log.d(TAG, "No expiry to record (blocked or not yet expired)") }
     }
 
     /** Sends the access request. Only name, phone, device, approved (false) and createdAt are allowed by the rules. */
@@ -203,8 +295,12 @@ class LicenseManager(
 
     companion object {
         private const val TAG = "LicenseManager"
-        private const val COLLECTION = "devices"
+        const val COLLECTION = "devices"
+        /** Must match isAdmin() in firestore.rules. */
+        const val ADMIN_EMAIL = "shaikatsaha93@gmail.com"
         private const val KEY_PROVISIONED_ID = "provisioned_account_id"
         private const val KEY_WAS_APPROVED = "was_approved"
+        /** Subscription length when the admin approves without setting expiresAt. */
+        private const val DEFAULT_DAYS = 30L
     }
 }

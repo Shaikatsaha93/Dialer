@@ -5,6 +5,7 @@ import android.util.Log
 import com.example.data.local.AppDatabase
 import com.example.data.model.CallType
 import com.example.data.repository.CallLogRepository
+import com.example.data.repository.AdminManager
 import com.example.data.repository.FcmTokenManager
 import com.example.data.repository.LicenseManager
 import com.example.data.repository.LicenseState
@@ -45,6 +46,8 @@ class SoftphoneApp : Application() {
         private set
     lateinit var licenseManager: LicenseManager
         private set
+    lateinit var adminManager: AdminManager
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -65,6 +68,7 @@ class SoftphoneApp : Application() {
         // After FcmTokenManager, which initializes FirebaseApp
         licenseManager = LicenseManager(this, accountRepository)
         licenseManager.start()
+        adminManager = AdminManager(this)
         if (contactsRepository.hasContactsPermission()) {
             applicationScope.launch {
                 contactsRepository.loadContacts()
@@ -72,6 +76,7 @@ class SoftphoneApp : Application() {
         }
 
         observeActiveAccount()
+        observeAdmin()
         observeCallEvents()
     }
 
@@ -92,6 +97,15 @@ class SoftphoneApp : Application() {
                 } else {
                     sipManager.unregisterCurrentAccount()
                 }
+            }
+        }
+    }
+
+    /** The admin's phone watches access requests (and notifies about new ones) while signed in. */
+    private fun observeAdmin() {
+        applicationScope.launch(Dispatchers.Main) {
+            licenseManager.isAdmin.collect { admin ->
+                if (admin) adminManager.startWatching() else adminManager.stopWatching()
             }
         }
     }

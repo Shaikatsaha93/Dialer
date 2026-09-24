@@ -2,14 +2,27 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // The admin (Firebase email/password user). Must match LicenseManager.ADMIN_EMAIL.
+    function isAdmin() {
+      return request.auth != null &&
+        request.auth.token.firebase.sign_in_provider == 'password' &&
+        request.auth.token.email == 'shaikatsaha93@gmail.com';
+    }
+
     // One record per app install: devices/{uid}
     match /devices/{uid} {
+
+      // The admin sees every request and can approve, renew, block and delete
+      allow read, update, delete: if isAdmin();
 
       function isOwner() {
         return request.auth != null && request.auth.uid == uid;
       }
       function notExpired() {
         return !('expiresAt' in resource.data) || resource.data.expiresAt > request.time;
+      }
+      function changedOnly(keys) {
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
       }
 
       // Readable by its own install when:
@@ -31,8 +44,31 @@ service cloud.firestore {
         request.resource.data.name is string && request.resource.data.name.size() <= 60 &&
         request.resource.data.phone is string && request.resource.data.phone.size() <= 20;
 
-      // No update or delete from the app: only the admin (Firebase console)
-      // can change approved, expiry date and SIP details.
+      // The app may make exactly two changes to its own record:
+      allow update: if isOwner() && (
+        // 1. Admin just approved without a date: start 30 days from now.
+        //    The date must be between 29 and 30 days ahead, so nobody can give themselves more.
+        (resource.data.approved == true &&
+          !('expiresAt' in resource.data) &&
+          changedOnly(['expiresAt', 'approvedAt']) &&
+          request.resource.data.expiresAt is timestamp &&
+          request.resource.data.expiresAt > request.time + duration.value(29, 'd') &&
+          request.resource.data.expiresAt <= request.time + duration.value(30, 'd') &&
+          request.resource.data.approvedAt == request.time)
+        ||
+        // 2. The date has passed: switch approved off and clear the date,
+        //    so the next approval starts a new 30 days.
+        (resource.data.approved == true &&
+          'expiresAt' in resource.data &&
+          resource.data.expiresAt <= request.time &&
+          changedOnly(['approved', 'expiresAt']) &&
+          request.resource.data.approved == false &&
+          !('expiresAt' in request.resource.data))
+      );
+
+      // No delete from the app. Everything else (approving, blocking,
+      // extending expiresAt, SIP details) is done by the admin: in the app's
+      // Admin tab or in the Firebase console.
     }
   }
 }
