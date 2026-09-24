@@ -1,0 +1,38 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // One record per app install: devices/{uid}
+    match /devices/{uid} {
+
+      function isOwner() {
+        return request.auth != null && request.auth.uid == uid;
+      }
+      function notExpired() {
+        return !('expiresAt' in resource.data) || resource.data.expiresAt > request.time;
+      }
+
+      // Readable by its own install when:
+      // - it does not exist yet (new install), or
+      // - approved == true and not expired, or
+      // - not approved and holds no SIP password (pending request).
+      // Expired, or switched off while holding a SIP password: denied,
+      // so the app locks and the password stays hidden.
+      allow get: if isOwner() && (
+        resource == null ||
+        (resource.data.approved == true && notExpired()) ||
+        (resource.data.approved != true && !('sipPassword' in resource.data))
+      );
+
+      // The app can only create its own request, always with approved == false
+      allow create: if isOwner() &&
+        request.resource.data.approved == false &&
+        request.resource.data.keys().hasOnly(['name', 'phone', 'device', 'approved', 'createdAt']) &&
+        request.resource.data.name is string && request.resource.data.name.size() <= 60 &&
+        request.resource.data.phone is string && request.resource.data.phone.size() <= 20;
+
+      // No update or delete from the app: only the admin (Firebase console)
+      // can change approved, expiry date and SIP details.
+    }
+  }
+}

@@ -32,6 +32,10 @@ class SipAccountRepository(private val dao: SipAccountDao) {
         dao.deleteAccount(account)
     }
 
+    suspend fun deleteAccountById(id: Long) {
+        dao.deleteAccountById(id)
+    }
+
     suspend fun updateRegistrationStatus(id: Long, status: RegistrationStatus, message: String) {
         dao.updateStatus(id, status, message)
     }

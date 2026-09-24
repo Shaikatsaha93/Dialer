@@ -2,22 +2,23 @@
 
 A native Android SIP/VoIP softphone for call-center agents, built with Kotlin, Jetpack Compose and the [Linphone SDK](https://www.linphone.org/).
 
-It registers to a SIP server (tested with **iTelSwitchPlus 8.0.0**), places and receives calls, runs 3-way conference calls on the device, and shows the account's prepaid balance on the home screen.
+It registers to a SIP server (tested with **iTelSwitchPlus 8.0.0**), places and receives calls, runs 3-way conference calls on the device, and shows the account's prepaid balance on the home screen. Each install must be approved by the admin before it can be used.
 
 > Developed by Shaikat.
 
 ## Features
 
+- **Admin approval and subscription:** a new install sends an access request and stays locked until the admin approves it in Firebase. The admin can set an expiry date and block a device remotely. See [Access control (admin approval)](#access-control-admin-approval).
 - **SIP calling:** register over UDP, TCP or TLS, make and receive calls, DTMF keypad, mute, speaker/earpiece, hold.
 - **3-way conference:** add a second party during a call. The call is mixed on the phone by Linphone's local conference. You can remove participants or leave and rejoin the conference.
-- **Account balance:** reads the prepaid balance that iTelSwitchPlus sends on every registration and shows it on the dialer status card. It refreshes about once a minute and after every call, and turns red below 5.
+- **Account balance:** reads the prepaid balance that iTelSwitchPlus sends on every registration and shows it on the dialer status card, next to the SIP number. The currency (e.g. BDT) comes from the server; other SIP servers send no balance, so none is shown. It refreshes about once a minute and after every call, and turns red below 5.
 - **Multiple SIP accounts** stored locally with Room. One account is active at a time.
 - **Call history:** incoming, outgoing and missed calls, with a filter. Each call is saved once, with the right direction.
 - **Device contacts:** search contacts and dial or add them to a call.
 - **Android Telecom integration** through a self-managed `ConnectionService`, a foreground service and an ongoing-call notification with Hang up, Mute and Speaker actions.
 - **Rings in the background:** a standby service keeps the SIP account registered with the screen off, in Doze and in battery saver, on Wi-Fi or mobile data. It starts again by itself after a reboot or an app update. Incoming calls open a full-screen call screen over the lock screen. See [Receiving calls in the background](#receiving-calls-in-the-background).
 - **Firebase Cloud Messaging:** a call push wakes the app and re-registers the SIP account so the real call can ring. Only real FCM tokens are shown. See [Push notifications (FCM)](#push-notifications-fcm).
-- **Small APK:** the release build is about 31 MB (it was 150 MB). See [APK size](#apk-size).
+- **Small APK:** the release build is about 32 MB (it was 150 MB). See [APK size](#apk-size).
 - **Other:** optional auto-answer, wake lock and Wi-Fi lock during calls.
 - **Glass design:** frosted-glass panels on a soft gradient backdrop, a floating tab bar, and Apple iOS system colors. Works in light and dark mode.
 - **Settings:** echo cancellation, adaptive rate control, mic gain, STUN, IPv6, keep-alive, theme (System, Light or Dark).
@@ -31,6 +32,7 @@ It registers to a SIP server (tested with **iTelSwitchPlus 8.0.0**), places and 
 | UI | Jetpack Compose, Material 3, Navigation Compose |
 | SIP / media | Linphone SDK for Android 5.2 (`org.linphone:linphone-sdk-android:5.2.+`) |
 | Storage | Room |
+| Access control | Firebase Authentication (anonymous) and Cloud Firestore |
 | Push | Firebase Cloud Messaging |
 | Build | Android Gradle Plugin 9.1, Gradle 9.3.1 |
 | Android | minSdk 24, targetSdk / compileSdk 36 |
@@ -46,15 +48,17 @@ app/src/main/java/com/example/
 ├── data/
 │   ├── model/      CallState, SipAccount, AccountBalance, AppSettings, …
 │   ├── local/      Room database and DAOs
-│   └── repository/ Accounts, call log, contacts, settings, FCM token
+│   └── repository/ Accounts, call log, contacts, settings, FCM token,
+│                   LicenseManager (admin approval)
 └── ui/
-    ├── screens/    Dialer, Active call, Contacts, History, Account settings
+    ├── screens/    Dialer, Active call, Contacts, History, Account settings,
+    │               LicenseScreen (access request / waiting / disabled)
     ├── components/ Keypad, cards, settings sections
     ├── theme/      Colors, typography, glass style (Glass.kt)
     └── viewmodel/  SoftphoneViewModel
 ```
 
-Almost all call logic is in [`SipManager.kt`](app/src/main/java/com/example/sip/SipManager.kt).
+Almost all call logic is in [`SipManager.kt`](app/src/main/java/com/example/sip/SipManager.kt). The Firestore security rules are in [`firestore.rules`](firestore.rules).
 
 ## Design
 
@@ -136,6 +140,73 @@ When registration succeeds, the dialer shows **SIP Online • Ready to Call** an
 
 A is not put on SIP hold while B rings; see the server notes below for why.
 
+## Access control (admin approval)
+
+Nobody can use the app without the admin's approval. It works like a subscription: the admin approves an install, can set an expiry date, and can switch it off at any time.
+
+### How it works
+
+1. On first start the app signs in to Firebase anonymously. Every install gets its own ID, shown on screen as **Device ID**. No password or OTP is needed.
+2. The user enters a name and phone number and taps **Send request**. The app creates `devices/{uid}` in Cloud Firestore with `approved: false` and shows **Waiting for approval**. The dialer does not open.
+3. The admin sets `approved` to `true` in the Firebase console. The app notices within a second, opens the dialer and registers the SIP account.
+4. While the app runs it keeps watching the record:
+
+| Record | App |
+|---|---|
+| No record | Request form |
+| `approved: false`, never approved | Waiting for approval |
+| `approved: true`, no `expiresAt` or a future one | App works |
+| `approved: true`, `expiresAt` in the past | **Access disabled**, SIP unregistered |
+| `approved: false` after being approved | **Access disabled**, SIP unregistered |
+
+When access ends, the app unregisters the SIP account at once. Setting `approved` back to `true`, or moving `expiresAt` forward, unlocks it again; the user can tap **Check again**. Three days before `expiresAt` the app shows a reminder on start.
+
+### Security
+
+The rules in [`firestore.rules`](firestore.rules) make sure that:
+
+- an install can read only its own record;
+- the app can create a record only for itself, only with `approved: false` and only with the fields `name`, `phone`, `device`, `approved` and `createdAt`;
+- the app can never update or delete a record, so nobody can approve themselves or extend their own expiry;
+- once a record is expired, or switched off while it holds a SIP password, the app cannot read it at all.
+
+`approved` is a boolean, so the Firebase console shows a **true / false** dropdown and there is nothing to mistype.
+
+The check runs in the app, so a modified APK could skip it. For full protection, give agents their SIP account through the record (below) instead of telling them the password. Then a blocked or modified app has no SIP account to use.
+
+### One-time Firebase setup
+
+In the [Firebase console](https://console.firebase.google.com), project `fir-7eb9d`:
+
+1. **Authentication → Sign-in method → Add new provider → Anonymous → Enable → Save.** Leave *Auto clean-up* off, otherwise approved installs lose their ID after 30 days.
+2. **Firestore Database → Create database.** Choose location `asia-south1` (Mumbai) and production mode.
+3. **Firestore Database → Rules:** paste the contents of [`firestore.rules`](firestore.rules) and click **Publish**.
+
+The free Spark plan is enough.
+
+### Daily admin work
+
+In **Firestore Database → Data → devices**, each request is one document. Its ID starts with the Device ID shown in the app.
+
+| Task | What to change |
+|---|---|
+| Approve | `approved` → `true` |
+| Block | `approved` → `false` |
+| Set or renew the subscription | add or edit `expiresAt`, type **timestamp** |
+| No time limit | leave out `expiresAt` |
+
+**Give the SIP account from Firebase (optional).** Add these fields to the approved record. The app saves the account, makes it active and registers. It deletes it again when access ends.
+
+| Field | Type | Example |
+|---|---|---|
+| `sipUsername` | string | `09678771660` |
+| `sipPassword` | string | the SIP password |
+| `sipDomain` | string | `203.76.101.50` |
+| `sipPort` | number | `5060` (optional) |
+| `sipDisplayName` | string | optional |
+
+**Reinstalling** the app creates a new Device ID, so the user has to send a new request. Updating the app keeps the ID.
+
 ## Receiving calls in the background
 
 The app rings without being open: with the screen off, in Doze, in battery saver, and on Wi-Fi or mobile data.
@@ -201,7 +272,7 @@ Ask your provider whether iTelSwitchPlus supports FCM or RFC 8599 push. Until it
 
 ## APK size
 
-The release APK is about **31 MB** (it was about 150 MB):
+The release APK is about **32 MB** (it was about 150 MB):
 
 - **R8** minifies and shrinks code and resources. `proguard-rules.pro` keeps `org.linphone.**`, because the native library calls those classes through JNI.
 - **ABIs:** release builds include only `arm64-v8a` and `armeabi-v7a` (real phones). Debug builds include `arm64-v8a` and `x86_64` for the emulator. Linphone's native code is about 30 MB per ABI.
@@ -230,4 +301,5 @@ These behaviours were found in SIP traces and shaped the implementation:
   ```
   During a conference, `[Conf Stats]` lines appear every 2 seconds with each leg's codec, direction and bandwidth. `in=0.0kbps` on a leg means that party's audio is not reaching the phone.
 - **Calls are missed when the phone is locked.** Open **Settings → Background & Lock Screen** and make sure both items show a green tick. Check that the *SIP Softphone Standby* notification is present. On Xiaomi, Oppo, Vivo, Realme and Samsung phones also allow Autostart.
+- **App shows "Access disabled" although the record says approved.** `approved` must be a **boolean** `true`, not the text `"true"`. If `expiresAt` is set, it must be a **timestamp** in the future. Check that the rules from `firestore.rules` are published. Then tap **Check again**.
 - **Registration fails.** The Settings screen shows the SIP error code: 401/407 for wrong credentials, 403 for a forbidden or blocked account, 404 for an unknown user, 408 for an unreachable server.

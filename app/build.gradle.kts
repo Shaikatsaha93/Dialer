@@ -124,12 +124,11 @@ dependencies {
   implementation(libs.firebase.messaging)
   // GoogleApiAvailability for the FCM Play Services check (came in via App Check before)
   implementation("com.google.android.gms:play-services-base:18.9.0")
-  // Uncomment to use Firestore:
-  // implementation(libs.firebase.firestore)
+  // Admin approval / subscription: anonymous sign-in + devices/{uid} in Firestore
+  implementation(libs.firebase.auth)
+  implementation(libs.firebase.firestore)
 
-  // Uncomment ALL FOUR of the following dependencies together to use Firebase Auth and Google
-  // Sign-In via Credential Manager:
-  // implementation(libs.firebase.auth)
+  // Uncomment these three (firebase-auth is already on) to use Google Sign-In via Credential Manager:
   // implementation(libs.androidx.credentials)
   // implementation(libs.androidx.credentials.play.services)
   // implementation(libs.googleid)

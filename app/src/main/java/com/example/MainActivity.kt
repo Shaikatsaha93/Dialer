@@ -3,6 +3,9 @@ package com.example
 import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
+import android.widget.Toast
+import java.text.DateFormat
+import java.util.concurrent.TimeUnit
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -14,8 +17,10 @@ import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.AppThemeMode
 import com.example.data.model.CallState
+import com.example.data.repository.LicenseState
 import com.example.service.BackgroundReliability
 import com.example.service.SipForegroundService
+import com.example.ui.screens.LicenseScreen
 import com.example.ui.screens.SoftphoneMainScreen
 import com.example.ui.theme.SoftphoneTheme
 import com.example.ui.viewmodel.SoftphoneViewModel
@@ -69,8 +74,30 @@ class MainActivity : ComponentActivity() {
                 enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
             }
 
+            val license by SoftphoneApp.instance.licenseManager.state.collectAsStateWithLifecycle()
+
+            // Warn once per launch when the subscription ends within 3 days
+            LaunchedEffect((license as? LicenseState.Approved)?.expiresAt) {
+                val expiresAt = (license as? LicenseState.Approved)?.expiresAt ?: return@LaunchedEffect
+                val daysLeft = TimeUnit.MILLISECONDS.toDays(expiresAt.time - System.currentTimeMillis())
+                if (daysLeft < 3) {
+                    val date = DateFormat.getDateInstance(DateFormat.MEDIUM).format(expiresAt)
+                    Toast.makeText(this@MainActivity, "Subscription ends on $date. Contact the admin to renew.", Toast.LENGTH_LONG).show()
+                }
+            }
+
             SoftphoneTheme(darkTheme = isDarkTheme) {
-                SoftphoneMainScreen(viewModel = viewModel)
+                if (license is LicenseState.Approved) {
+                    SoftphoneMainScreen(viewModel = viewModel)
+                } else {
+                    val licenseManager = SoftphoneApp.instance.licenseManager
+                    LicenseScreen(
+                        state = license,
+                        installId = licenseManager.installId,
+                        onSubmit = licenseManager::submitRequest,
+                        onRetry = licenseManager::refresh
+                    )
+                }
             }
         }
     }
@@ -87,6 +114,14 @@ class MainActivity : ComponentActivity() {
         try {
             startActivity(BackgroundReliability.batteryOptimizationIntent(this))
         } catch (_: Exception) {}
+    }
+
+    override fun onStart() {
+        super.onStart()
+        // A blocked/offline install re-checks each time the app is opened
+        val licenseManager = SoftphoneApp.instance.licenseManager
+        val state = licenseManager.state.value
+        if (state is LicenseState.Denied || state is LicenseState.Error) licenseManager.refresh()
     }
 
     private fun configureLockScreenFlags() {

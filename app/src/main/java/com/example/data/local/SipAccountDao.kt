@@ -33,6 +33,9 @@ interface SipAccountDao {
     @Delete
     suspend fun deleteAccount(account: SipAccount)
 
+    @Query("DELETE FROM sip_accounts WHERE id = :id")
+    suspend fun deleteAccountById(id: Long)
+
     @Query("UPDATE sip_accounts SET isActive = 0")
     suspend fun deactivateAllAccounts()
 
