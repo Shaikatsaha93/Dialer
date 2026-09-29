@@ -233,10 +233,20 @@ class SipForegroundService : Service() {
      */
     private fun serviceType(inCall: Boolean): Int = when {
         Build.VERSION.SDK_INT < Build.VERSION_CODES.Q -> 0
-        inCall || Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE ->
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
+        inCall -> ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL or microphoneType()
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE -> ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
         else -> ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
     }
+
+    /**
+     * During a call also "microphone": Android 11+ only lets a background app record while a
+     * foreground service of that type runs, otherwise the other side hears silence once the
+     * screen locks. Only with the permission granted, or startForeground throws.
+     */
+    private fun microphoneType(): Int =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+            checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0
 
     private fun showForeground(notification: Notification, inCall: Boolean) {
         val type = serviceType(inCall)
@@ -255,6 +265,12 @@ class SipForegroundService : Service() {
         } catch (e: SecurityException) {
             Log.e(TAG, "SecurityException starting foreground service: ${e.message}")
             try {
+                // Microphone type refused (started from the background): keep the call service at least
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && type != ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL && inCall) {
+                    startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL)
+                    foregroundType = ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
+                    return
+                }
                 startForeground(NOTIFICATION_ID, notification)
             } catch (fallbackError: Throwable) {
                 Log.e(TAG, "Fallback startForeground error: ${fallbackError.message}")

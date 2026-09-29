@@ -21,49 +21,25 @@ import java.util.Calendar
 import java.util.Date
 import java.util.concurrent.TimeUnit
 
-enum class DeviceStatus { PENDING, ACTIVE, EXPIRED, DISABLED }
-
-/** One install's access record (devices/{id}) as the admin sees it. */
-data class DeviceRecord(
-    val id: String,
-    val name: String,
-    val phone: String,
-    val device: String,
-    val approved: Boolean,
-    val expiresAt: Date?,
-    val createdAt: Date?,
-    val approvedAt: Date?,
-    val hasSipAccount: Boolean
-) {
-    val status: DeviceStatus
-        get() = when {
-            approved && expiresAt != null && expiresAt.before(Date()) -> DeviceStatus.EXPIRED
-            approved -> DeviceStatus.ACTIVE
-            // Never approved before = a new request; otherwise switched off or expired
-            approvedAt == null -> DeviceStatus.PENDING
-            else -> DeviceStatus.DISABLED
-        }
-}
-
 /**
  * Admin panel data: watches all access records while the admin is signed in, performs
  * approve / renew / block / delete, and notifies about new requests. Firestore rules allow all of
  * this only for the admin email.
  */
-class AdminManager(private val context: Context) {
+class AdminManager(private val context: Context) : AdminService {
 
     private val firestore get() = FirebaseFirestore.getInstance()
     private val prefs = context.getSharedPreferences("admin", Context.MODE_PRIVATE)
 
     private val _devices = MutableStateFlow<List<DeviceRecord>>(emptyList())
-    val devices: StateFlow<List<DeviceRecord>> = _devices.asStateFlow()
+    override val devices: StateFlow<List<DeviceRecord>> = _devices.asStateFlow()
 
     private val _error = MutableStateFlow<String?>(null)
-    val error: StateFlow<String?> = _error.asStateFlow()
+    override val error: StateFlow<String?> = _error.asStateFlow()
 
     private var listener: ListenerRegistration? = null
 
-    fun startWatching() {
+    override fun startWatching() {
         if (listener != null) return
         createNotificationChannel()
         listener = firestore.collection(LicenseManager.COLLECTION)
@@ -78,21 +54,21 @@ class AdminManager(private val context: Context) {
                     // Pending first, then newest
                     .sortedWith(
                         compareBy<DeviceRecord> { it.status != DeviceStatus.PENDING }
-                            .thenByDescending { it.createdAt?.time ?: 0L }
+                            .thenByDescending { it.createdAt ?: 0L }
                     )
                 _devices.value = records
                 notifyNewRequests(records)
             }
     }
 
-    fun stopWatching() {
+    override fun stopWatching() {
         listener?.remove()
         listener = null
         _devices.value = emptyList()
     }
 
     /** Approves for [days] days from today. */
-    fun approve(id: String, days: Int = DEFAULT_DAYS) {
+    override fun approve(id: String, days: Int) {
         update(
             id,
             mapOf(
@@ -104,21 +80,21 @@ class AdminManager(private val context: Context) {
     }
 
     /** Adds [days] to the current expiry, or to today if it already passed. */
-    fun extend(record: DeviceRecord, days: Int) {
+    override fun extend(record: DeviceRecord, days: Int) {
         val now = Date()
-        val base = record.expiresAt?.takeIf { it.after(now) } ?: now
+        val base = record.expiresAt?.let { Date(it) }?.takeIf { it.after(now) } ?: now
         update(
             record.id,
             mapOf(
                 "approved" to true,
                 "expiresAt" to Timestamp(daysFrom(base, days)),
-                "approvedAt" to (record.approvedAt?.let { Timestamp(it) } ?: FieldValue.serverTimestamp())
+                "approvedAt" to (record.approvedAt?.let { Timestamp(Date(it)) } ?: FieldValue.serverTimestamp())
             )
         )
     }
 
     /** No time limit (far-future date, because a missing expiresAt starts a new 30 days). */
-    fun approveWithoutLimit(id: String) {
+    override fun approveWithoutLimit(id: String) {
         val farFuture = Calendar.getInstance().apply { set(2099, Calendar.DECEMBER, 31) }.time
         update(
             id,
@@ -130,9 +106,9 @@ class AdminManager(private val context: Context) {
         )
     }
 
-    fun block(id: String) = update(id, mapOf("approved" to false))
+    override fun block(id: String) = update(id, mapOf("approved" to false))
 
-    fun delete(id: String) {
+    override fun delete(id: String) {
         firestore.collection(LicenseManager.COLLECTION).document(id).delete()
             .addOnFailureListener { e -> _error.value = "Delete failed: ${e.localizedMessage}" }
     }
@@ -153,9 +129,9 @@ class AdminManager(private val context: Context) {
         phone = getString("phone").orEmpty(),
         device = getString("device").orEmpty(),
         approved = getBoolean("approved") == true,
-        expiresAt = getTimestamp("expiresAt")?.toDate(),
-        createdAt = getTimestamp("createdAt")?.toDate(),
-        approvedAt = getTimestamp("approvedAt")?.toDate(),
+        expiresAt = getTimestamp("expiresAt")?.toDate()?.time,
+        createdAt = getTimestamp("createdAt")?.toDate()?.time,
+        approvedAt = getTimestamp("approvedAt")?.toDate()?.time,
         hasSipAccount = contains("sipUsername")
     )
 
@@ -205,6 +181,6 @@ class AdminManager(private val context: Context) {
         private const val TAG = "AdminManager"
         private const val CHANNEL_ID = "admin_access_requests"
         private const val KEY_NOTIFIED = "notified_request_ids"
-        const val DEFAULT_DAYS = 30
+        const val DEFAULT_DAYS = AdminService.DEFAULT_DAYS
     }
 }

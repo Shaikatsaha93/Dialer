@@ -15,7 +15,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-class FcmTokenManager(private val context: Context) {
+class FcmTokenManager(private val context: Context) : PushSource {
 
     private val prefs = context.getSharedPreferences("fcm_token_prefs", Context.MODE_PRIVATE)
     private val scope = CoroutineScope(Dispatchers.IO)
@@ -24,13 +24,13 @@ class FcmTokenManager(private val context: Context) {
     private val _fcmToken = MutableStateFlow(
         prefs.getString(KEY_FCM_TOKEN, null)?.takeUnless { it.startsWith(FAKE_TOKEN_PREFIX) }
     )
-    val fcmToken: StateFlow<String?> = _fcmToken.asStateFlow()
+    override val fcmToken: StateFlow<String?> = _fcmToken.asStateFlow()
 
     private val _tokenStatus = MutableStateFlow("Fetching FCM token...")
-    val tokenStatus: StateFlow<String> = _tokenStatus.asStateFlow()
+    override val tokenStatus: StateFlow<String> = _tokenStatus.asStateFlow()
 
     private val _receivedPushes = MutableStateFlow<List<PushMessageItem>>(emptyList())
-    val receivedPushes: StateFlow<List<PushMessageItem>> = _receivedPushes.asStateFlow()
+    override val receivedPushes: StateFlow<List<PushMessageItem>> = _receivedPushes.asStateFlow()
 
     fun initialize() {
         // Drop a fake token saved by older versions
@@ -103,17 +103,17 @@ class FcmTokenManager(private val context: Context) {
         prefs.edit().putString(KEY_FCM_TOKEN, token).apply()
     }
 
-    fun refreshToken() {
+    override fun refreshToken() {
         _tokenStatus.value = "Refreshing FCM token..."
         fetchLiveTokenInBackground()
     }
 
-    fun recordPushMessage(item: PushMessageItem) {
+    override fun recordPushMessage(item: PushMessageItem) {
         val updated = (listOf(item) + _receivedPushes.value).take(30)
         _receivedPushes.value = updated
     }
 
-    fun clearPushHistory() {
+    override fun clearPushHistory() {
         _receivedPushes.value = emptyList()
     }
 

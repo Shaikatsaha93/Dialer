@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.view.WindowManager
 import android.widget.Toast
 import java.text.DateFormat
+import java.util.Date
 import java.util.concurrent.TimeUnit
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -35,12 +36,16 @@ class MainActivity : ComponentActivity() {
     /** Set when opened from a "new access request" notification. */
     private var openAdminRequest by mutableStateOf(false)
 
+    /** Conversation to open, when started from a chat notification. */
+    private var openChatRequest by mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
         configureLockScreenFlags()
         openAdminRequest = intent?.getBooleanExtra(EXTRA_OPEN_ADMIN, false) == true
+        openChatRequest = intent?.getStringExtra(EXTRA_OPEN_CHAT)
 
         setContent {
             val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
@@ -86,9 +91,9 @@ class MainActivity : ComponentActivity() {
             // Warn once per launch when the subscription ends within 3 days
             LaunchedEffect((license as? LicenseState.Approved)?.expiresAt) {
                 val expiresAt = (license as? LicenseState.Approved)?.expiresAt ?: return@LaunchedEffect
-                val daysLeft = TimeUnit.MILLISECONDS.toDays(expiresAt.time - System.currentTimeMillis())
+                val daysLeft = TimeUnit.MILLISECONDS.toDays(expiresAt - System.currentTimeMillis())
                 if (daysLeft < 3) {
-                    val date = DateFormat.getDateInstance(DateFormat.MEDIUM).format(expiresAt)
+                    val date = DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(expiresAt))
                     Toast.makeText(this@MainActivity, "Subscription ends on $date. Contact the admin to renew.", Toast.LENGTH_LONG).show()
                 }
             }
@@ -98,7 +103,9 @@ class MainActivity : ComponentActivity() {
                     SoftphoneMainScreen(
                         viewModel = viewModel,
                         openAdminRequest = openAdminRequest,
-                        onAdminOpened = { openAdminRequest = false }
+                        onAdminOpened = { openAdminRequest = false },
+                        openChatRequest = openChatRequest,
+                        onChatOpened = { openChatRequest = null }
                     )
                 } else {
                     val licenseManager = SoftphoneApp.instance.licenseManager
@@ -131,6 +138,7 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         if (intent.getBooleanExtra(EXTRA_OPEN_ADMIN, false)) openAdminRequest = true
+        intent.getStringExtra(EXTRA_OPEN_CHAT)?.let { openChatRequest = it }
     }
 
     override fun onStart() {
@@ -157,5 +165,6 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_OPEN_ADMIN = "open_admin"
+        const val EXTRA_OPEN_CHAT = "open_chat"
     }
 }

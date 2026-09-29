@@ -16,3 +16,6 @@
 local.properties
 .env
 debug.keystore
+
+# Linphone Windows DLLs (downloaded by :desktopApp:fetchLinphoneWindows)
+/desktopApp/linphone/

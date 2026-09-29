@@ -28,6 +28,7 @@ class SoftphoneConnectionService : ConnectionService() {
         connection.setAddress(addressUri, TelecomManager.PRESENTATION_ALLOWED)
         connection.setCallerDisplayName(displayName, TelecomManager.PRESENTATION_ALLOWED)
         connection.setRinging()
+        SoftphoneConnection.track(connection)
         return connection
     }
 
@@ -41,6 +42,7 @@ class SoftphoneConnectionService : ConnectionService() {
         connection.connectionCapabilities = Connection.CAPABILITY_SUPPORT_HOLD or Connection.CAPABILITY_HOLD or Connection.CAPABILITY_MUTE
         connection.setAddress(addressUri, TelecomManager.PRESENTATION_ALLOWED)
         connection.setDialing()
+        SoftphoneConnection.track(connection)
         return connection
     }
 
@@ -81,16 +83,51 @@ class SoftphoneConnection(
 
     override fun onReject() {
         Log.i("SoftphoneConnection", "onReject called by Telecom")
-        setDisconnected(DisconnectCause(DisconnectCause.REJECTED))
-        destroy()
+        finish(DisconnectCause.REJECTED)
         sipManager.hangupCall()
     }
 
     override fun onDisconnect() {
         Log.i("SoftphoneConnection", "onDisconnect called by Telecom")
-        setDisconnected(DisconnectCause(DisconnectCause.LOCAL))
-        destroy()
+        finish(DisconnectCause.LOCAL)
         sipManager.hangupCall()
+    }
+
+    private fun finish(cause: Int) {
+        if (current === this) current = null
+        setDisconnected(DisconnectCause(cause))
+        destroy()
+    }
+
+    companion object {
+        /**
+         * The call Android's Telecom knows about. It must follow the SIP call: answered in the
+         * app's own screen = active, ended = disconnected. A connection left "ringing" keeps
+         * Android's audio in ringtone mode, and many phones then mute the call both ways.
+         */
+        @Volatile
+        private var current: SoftphoneConnection? = null
+
+        fun track(connection: SoftphoneConnection) {
+            // A leftover connection from an earlier call would block audio for the new one
+            current?.takeIf { it !== connection }?.finish(DisconnectCause.OTHER)
+            current = connection
+        }
+
+        /** The SIP call is connected (answered in the app or by the other side). */
+        fun onCallActive() {
+            current?.takeIf { it.state != STATE_ACTIVE }?.setActive()
+        }
+
+        fun onCallHeld(held: Boolean) {
+            val c = current ?: return
+            if (held && c.state == STATE_ACTIVE) c.setOnHold()
+        }
+
+        /** The SIP call ended: release Telecom's call so Android's audio goes back to normal. */
+        fun onCallEnded(missed: Boolean) {
+            current?.finish(if (missed) DisconnectCause.MISSED else DisconnectCause.REMOTE)
+        }
     }
 
     override fun onHold() {

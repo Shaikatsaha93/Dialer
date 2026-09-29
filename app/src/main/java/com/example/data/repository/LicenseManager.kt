@@ -24,20 +24,6 @@ import kotlinx.coroutines.launch
 import java.util.Date
 import java.util.concurrent.TimeUnit
 
-/** Whether this install may use the app; decided by the admin in Firestore devices/{uid}. */
-sealed class LicenseState {
-    data object Checking : LicenseState()
-    /** No request sent yet: show the request form. */
-    data object NeedsRequest : LicenseState()
-    data class Pending(val name: String) : LicenseState()
-    /** [expiresAt] null = no expiry. */
-    data class Approved(val expiresAt: Date?) : LicenseState()
-    /** Blocked or expired (Firestore rules then refuse to return the record). */
-    data object Denied : LicenseState()
-    /** Could not reach Firebase before we knew anything (first start offline, sign-in failed). */
-    data class Error(val message: String) : LicenseState()
-}
-
 /**
  * Admin approval ("subscription") for the app.
  *
@@ -58,18 +44,18 @@ sealed class LicenseState {
 class LicenseManager(
     private val context: Context,
     private val accountRepository: SipAccountRepository
-) {
+) : LicenseService {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val prefs = context.getSharedPreferences("license", Context.MODE_PRIVATE)
 
     private val _state = MutableStateFlow<LicenseState>(LicenseState.Checking)
-    val state: StateFlow<LicenseState> = _state.asStateFlow()
+    override val state: StateFlow<LicenseState> = _state.asStateFlow()
 
     private var listener: ListenerRegistration? = null
 
     /** Signed in with the admin email: always allowed, and sees the Admin tab. */
     private val _isAdmin = MutableStateFlow(false)
-    val isAdmin: StateFlow<Boolean> = _isAdmin.asStateFlow()
+    override val isAdmin: StateFlow<Boolean> = _isAdmin.asStateFlow()
 
     private val auth get() = FirebaseAuth.getInstance()
     private val firestore get() = FirebaseFirestore.getInstance()
@@ -98,7 +84,7 @@ class LicenseManager(
     }
 
     /** Re-check, e.g. when the app comes to the foreground after being blocked or offline. */
-    fun refresh() {
+    override fun refresh() {
         subscriptionWriteTried = false
         expireWriteTried = false
         listener?.remove()
@@ -106,13 +92,13 @@ class LicenseManager(
         start()
     }
 
-    val installId: String? get() = auth.currentUser?.uid
+    override val installId: String? get() = auth.currentUser?.uid
 
     /**
      * Admin sign-in (Firebase email/password user created in the console). This replaces the
      * install's anonymous identity; signing out later needs a new access request.
      */
-    fun signInAdmin(email: String, password: String, onResult: (String?) -> Unit) {
+    override fun signInAdmin(email: String, password: String, onResult: (String?) -> Unit) {
         if (!email.trim().equals(ADMIN_EMAIL, ignoreCase = true)) {
             onResult("This email is not the admin account")
             return
@@ -128,7 +114,7 @@ class LicenseManager(
             }
     }
 
-    fun signOutAdmin() {
+    override fun signOutAdmin() {
         auth.signOut()
         _isAdmin.value = false
         prefs.edit().remove(KEY_WAS_APPROVED).apply()
@@ -178,7 +164,7 @@ class LicenseManager(
                 onDenied()
             } else {
                 prefs.edit().putBoolean(KEY_WAS_APPROVED, true).apply()
-                _state.value = LicenseState.Approved(expiresAt)
+                _state.value = LicenseState.Approved(expiresAt.time)
                 provisionSipAccount(doc)
             }
         } else if (prefs.getBoolean(KEY_WAS_APPROVED, false)) {
@@ -231,7 +217,7 @@ class LicenseManager(
     }
 
     /** Sends the access request. Only name, phone, device, approved (false) and createdAt are allowed by the rules. */
-    fun submitRequest(name: String, phone: String, onResult: (String?) -> Unit) {
+    override fun submitRequest(name: String, phone: String, onResult: (String?) -> Unit) {
         val uid = auth.currentUser?.uid
         if (uid == null) {
             onResult("Not signed in yet. Check the internet connection.")
@@ -295,12 +281,12 @@ class LicenseManager(
 
     companion object {
         private const val TAG = "LicenseManager"
-        const val COLLECTION = "devices"
+        const val COLLECTION = LicenseService.COLLECTION
         /** Must match isAdmin() in firestore.rules. */
-        const val ADMIN_EMAIL = "shaikatsaha93@gmail.com"
+        const val ADMIN_EMAIL = LicenseService.ADMIN_EMAIL
         private const val KEY_PROVISIONED_ID = "provisioned_account_id"
         private const val KEY_WAS_APPROVED = "was_approved"
         /** Subscription length when the admin approves without setting expiresAt. */
-        private const val DEFAULT_DAYS = 30L
+        private const val DEFAULT_DAYS = LicenseService.DEFAULT_DAYS
     }
 }

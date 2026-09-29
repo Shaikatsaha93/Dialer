@@ -94,6 +94,8 @@ googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.W
 // (Retrofit/Moshi/OkHttp, Firebase AI and App Check were never used and only added APK size).
 // This makes it easy to add them back in the future if needed.
 dependencies {
+  // Screens, models, database and chat shared with the Windows app
+  implementation(project(":shared"))
   implementation(platform(libs.androidx.compose.bom))
   implementation(platform(libs.firebase.bom))
   // implementation(libs.accompanist.permissions)

@@ -1,6 +1,6 @@
 # Dialer
 
-A native Android SIP/VoIP softphone for call-center agents, built with Kotlin, Jetpack Compose and the [Linphone SDK](https://www.linphone.org/).
+A SIP/VoIP softphone for call-center agents that runs on **Android** and **Windows**, built with Kotlin, Compose Multiplatform and the [Linphone SDK](https://www.linphone.org/). Both apps share one code base for the screens, models, database and chat; iOS and web can be added on the same base later (see [Platforms](#platforms)).
 
 It registers to a SIP server (tested with **iTelSwitchPlus 8.0.0**), places and receives calls, runs 3-way conference calls on the device, and shows the account's prepaid balance on the home screen. Each install must be approved by the admin before it can be used.
 
@@ -9,6 +9,10 @@ It registers to a SIP server (tested with **iTelSwitchPlus 8.0.0**), places and 
 ## Features
 
 - **Admin approval and 30-day subscription:** a new install sends an access request and stays locked until the admin approves it. An approval lasts 30 days, then the app locks itself until renewed. The admin approves, renews and blocks devices from the **Admin** tab on their own phone and gets a notification for each new request. See [Access control (admin approval)](#access-control-admin-approval).
+- **Windows app:** the same screens and features on a PC, with an installer (`Dialer-1.0.0.exe`). It keeps running in the system tray so calls still ring. See [Windows app](#windows-app).
+- **Chat:** 1-to-1 and group text chat between SIP users over SIP MESSAGE (for example through Asterisk).
+- **Call recording:** switch on in Settings to record every call to a WAV file on the device (Android: the app folder; Windows: Documents\Dialer\Recordings), with play, share/show and delete.
+- **Edit SIP accounts:** change a saved account from Settings; it re-registers with the new details.
 - **SIP calling:** register over UDP, TCP or TLS, make and receive calls, DTMF keypad, mute, speaker/earpiece, hold.
 - **3-way conference:** add a second party during a call. The call is mixed on the phone by Linphone's local conference. You can remove participants or leave and rejoin the conference.
 - **Account balance:** reads the prepaid balance that iTelSwitchPlus sends on every registration and shows it on the dialer status card, next to the SIP number. The currency (e.g. BDT) comes from the server; other SIP servers send no balance, so none is shown. It refreshes about once a minute and after every call, and turns red below 5.
@@ -28,11 +32,11 @@ It registers to a SIP server (tested with **iTelSwitchPlus 8.0.0**), places and 
 
 | | |
 |---|---|
-| Language | Kotlin 2.2 |
-| UI | Jetpack Compose, Material 3, Navigation Compose |
-| SIP / media | Linphone SDK for Android 5.2 (`org.linphone:linphone-sdk-android:5.2.+`) |
-| Storage | Room |
-| Access control | Firebase Authentication (anonymous) and Cloud Firestore |
+| Language | Kotlin 2.2, Kotlin Multiplatform |
+| UI | Compose Multiplatform 1.9 (Jetpack Compose on Android), Material 3, Navigation Compose |
+| SIP / media | Android: Linphone SDK 5.2 (`org.linphone:linphone-sdk-android:5.2.+`). Windows: liblinphone 5.5 (C API through JNA) |
+| Storage | Room (KMP; bundled SQLite on Windows) |
+| Access control | Firebase Authentication (anonymous) and Cloud Firestore; the Windows app uses their REST APIs |
 | Push | Firebase Cloud Messaging |
 | Build | Android Gradle Plugin 9.1, Gradle 9.3.1 |
 | Android | minSdk 24, targetSdk / compileSdk 36 |
@@ -40,25 +44,69 @@ It registers to a SIP server (tested with **iTelSwitchPlus 8.0.0**), places and 
 ## Project structure
 
 ```
-app/src/main/java/com/example/
-├── sip/            SipManager: Linphone core, registration, calls, conference, balance
-├── telecom/        ConnectionService and PhoneAccount registration
-├── service/        Standby/call foreground service, FCM service, boot receiver,
-│                   battery and full-screen permission checks
-├── data/
-│   ├── model/      CallState, SipAccount, AccountBalance, AppSettings, …
-│   ├── local/      Room database and DAOs
-│   └── repository/ Accounts, call log, contacts, settings, FCM token,
-│                   LicenseManager (approval, 30-day expiry), AdminManager (Admin tab)
-└── ui/
-    ├── screens/    Dialer, Active call, Contacts, History, Account settings,
-    │               LicenseScreen (access request / waiting / disabled), AdminScreen
-    ├── components/ Keypad, cards, settings sections
-    ├── theme/      Colors, typography, glass style (Glass.kt)
-    └── viewmodel/  SoftphoneViewModel
+shared/            Code shared by all platforms (Kotlin Multiplatform)
+  src/commonMain/kotlin/com/example/
+  ├── AppGraph.kt       The services each app hands to the shared screens
+  ├── platform/         Small helpers (time, dates, URL encoding) without JVM APIs
+  ├── sip/              SipManager interface, CallEvent, chat headers
+  ├── data/
+  │   ├── model/        CallState, SipAccount, AccountBalance, AppSettings, Chat, …
+  │   ├── local/        Room database and DAOs
+  │   └── repository/   Accounts, call log, settings, chat, and the platform service
+  │                     interfaces (LicenseService, AdminService, ContactsSource, …)
+  └── ui/               Every screen, component, theme and SoftphoneViewModel
+  src/androidMain/      Android-only UI: permissions, recordings card, battery card, FCM card
+  src/desktopMain/      Windows-only UI: recordings card, toast
+  src/jvmShared/        JVM helpers used by Android and Windows
+
+app/               Android app
+  src/main/java/com/example/
+  ├── sip/              LinphoneSipManager (Linphone SDK for Android)
+  ├── telecom/          ConnectionService and PhoneAccount registration
+  ├── service/          Standby/call foreground service, FCM, boot receiver, notifications
+  └── data/repository/  LicenseManager, AdminManager (Firebase SDK), contacts, FCM token
+
+desktopApp/        Windows app
+  src/main/kotlin/com/example/desktop/
+  ├── Main.kt           Window, tray, approval gate
+  ├── sip/              DesktopSipManager + LinphoneNative (liblinphone through JNA)
+  └── firebase/         Firebase REST: approval (DesktopLicenseManager) and Admin tab
 ```
 
-Almost all call logic is in [`SipManager.kt`](app/src/main/java/com/example/sip/SipManager.kt). The Firestore security rules are in [`firestore.rules`](firestore.rules).
+The Android call logic is in [`LinphoneSipManager.kt`](app/src/main/java/com/example/sip/LinphoneSipManager.kt), the Windows one in [`DesktopSipManager.kt`](desktopApp/src/main/kotlin/com/example/desktop/sip/DesktopSipManager.kt). The Firestore security rules are in [`firestore.rules`](firestore.rules).
+
+## Platforms
+
+| Platform | Status | SIP engine |
+|---|---|---|
+| Android | Done | Linphone SDK for Android |
+| Windows | Done | liblinphone for Windows (JNA) |
+| iOS | Not started | Would use Linphone for iOS, CallKit and PushKit. Needs a Mac and an Apple Developer account to build. iOS does not keep a SIP registration in the background, so the server must send VoIP pushes. |
+| Web | Not started | Browsers cannot send UDP SIP, so it would use SIP.js over WebRTC. Needs SIP over WebSocket (WSS) on the server or a gateway such as Asterisk. |
+
+Adding a platform means adding a target to `shared` and implementing the interfaces in `AppGraph` (SIP, approval, contacts, push) for it; the screens are reused as they are.
+
+## Windows app
+
+### Install
+
+Run `Dialer-1.0.0.exe` (per-user install, no admin rights needed). It adds a Start menu entry and a desktop shortcut. The first start shows the same access-request screen as on Android; approve it from the Admin tab (phone or PC).
+
+- Closing the window keeps Dialer in the **system tray** so the account stays registered and calls ring. Use **Quit** in the tray menu to exit.
+- An incoming call brings the window to the front and shows a Windows notification.
+- Audio uses the default Windows microphone and speakers/headset (change them in Windows sound settings).
+- Data is stored in `%APPDATA%\Dialer` (database, Linphone state) and the Windows registry (settings, sign-in). Recordings go to `Documents\Dialer\Recordings`.
+- No phone contacts on Windows; dial numbers directly.
+
+### Build
+
+```bash
+./gradlew :desktopApp:run            # run from source
+./gradlew :desktopApp:packageExe     # installer in desktopApp/build/compose/binaries/main/exe/
+./gradlew :desktopApp:packageMsi     # MSI instead
+```
+
+The first build runs `fetchLinphoneWindows`, which downloads the official Linphone SDK for Windows (about 300 MB, once) and copies the needed DLLs, audio plugins, SIP grammars and sounds (about 57 MB) into `desktopApp/linphone/` (not committed). Building the installer needs Windows; the WiX tools are downloaded automatically.
 
 ## Design
 
@@ -80,8 +128,8 @@ The UI uses a frosted-glass style similar to iOS "Liquid Glass", with Apple's iO
 
 To change the look, edit two files:
 
-- [`ui/theme/Color.kt`](app/src/main/java/com/example/ui/theme/Color.kt): accent, text and call-button colors.
-- [`ui/theme/Glass.kt`](app/src/main/java/com/example/ui/theme/Glass.kt): glass transparency, edge brightness, and the backdrop gradient and glow colors (`LightGlassColors`, `DarkGlassColors`).
+- [`ui/theme/Color.kt`](shared/src/commonMain/kotlin/com/example/ui/theme/Color.kt): accent, text and call-button colors.
+- [`ui/theme/Glass.kt`](shared/src/commonMain/kotlin/com/example/ui/theme/Glass.kt): glass transparency, edge brightness, and the backdrop gradient and glow colors (`LightGlassColors`, `DarkGlassColors`).
 
 The glass panels are translucent but do not blur the content behind them. The backdrop is already soft, so they read as frosted glass and run smoothly on Android 7 and newer. Real backdrop blur would need a library such as Haze and works only on Android 12 and newer.
 

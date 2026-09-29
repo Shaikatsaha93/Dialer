@@ -28,4 +28,6 @@ dependencyResolutionManagement {
 rootProject.name = "Dialer"
 
 include(":app")
+include(":shared")
+include(":desktopApp")
 

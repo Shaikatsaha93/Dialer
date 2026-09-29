@@ -2,19 +2,25 @@ package com.example
 
 import android.app.Application
 import android.util.Log
+import com.example.data.local.AndroidDatabase
 import com.example.data.local.AppDatabase
+import com.example.data.local.SharedPrefsStore
+import com.example.data.model.CallState
 import com.example.data.model.CallType
 import com.example.data.repository.CallLogRepository
 import com.example.data.repository.AdminManager
+import com.example.data.repository.ChatRepository
 import com.example.data.repository.FcmTokenManager
 import com.example.data.repository.LicenseManager
 import com.example.data.repository.LicenseState
 import com.example.data.repository.SettingsRepository
 import com.example.data.repository.SipAccountRepository
+import com.example.service.AndroidChatNotifier
 import com.example.service.SipForegroundService
 import com.example.sip.CallEvent
 import com.example.sip.LinphoneSipManager
 import com.example.sip.SipManager
+import com.example.telecom.SoftphoneConnection
 import com.example.telecom.TelecomHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -48,15 +54,17 @@ class SoftphoneApp : Application() {
         private set
     lateinit var adminManager: AdminManager
         private set
+    lateinit var chatRepository: ChatRepository
+        private set
 
     override fun onCreate() {
         super.onCreate()
         instance = this
 
-        database = AppDatabase.getInstance(this)
+        database = AndroidDatabase.getInstance(this)
         accountRepository = SipAccountRepository(database.sipAccountDao())
         callLogRepository = CallLogRepository(database.callLogDao())
-        settingsRepository = SettingsRepository(this)
+        settingsRepository = SettingsRepository(SharedPrefsStore(this, "app_voip_settings"))
         fcmTokenManager = FcmTokenManager(this)
         contactsRepository = com.example.data.repository.ContactsRepository(this)
         sipManager = LinphoneSipManager(this)
@@ -69,6 +77,19 @@ class SoftphoneApp : Application() {
         licenseManager = LicenseManager(this, accountRepository)
         licenseManager.start()
         adminManager = AdminManager(this)
+        chatRepository = ChatRepository(database.chatDao(), sipManager, contactsRepository, AndroidChatNotifier(this), applicationScope)
+        chatRepository.start()
+
+        // Hand the services to the shared screens
+        AppGraph.sipManager = sipManager
+        AppGraph.accountRepository = accountRepository
+        AppGraph.callLogRepository = callLogRepository
+        AppGraph.settingsRepository = settingsRepository
+        AppGraph.contacts = contactsRepository
+        AppGraph.push = fcmTokenManager
+        AppGraph.license = licenseManager
+        AppGraph.admin = adminManager
+        AppGraph.chatRepository = chatRepository
         if (contactsRepository.hasContactsPermission()) {
             applicationScope.launch {
                 contactsRepository.loadContacts()
@@ -78,6 +99,18 @@ class SoftphoneApp : Application() {
         observeActiveAccount()
         observeAdmin()
         observeCallEvents()
+        observeTelecomState()
+    }
+
+    /** Keeps Android Telecom's copy of the call in step with the SIP call (see SoftphoneConnection). */
+    private fun observeTelecomState() {
+        applicationScope.launch(Dispatchers.Main) {
+            sipManager.callState.collect { state ->
+                if (state is CallState.Connected) {
+                    if (state.isOnHold) SoftphoneConnection.onCallHeld(true) else SoftphoneConnection.onCallActive()
+                }
+            }
+        }
     }
 
     private fun observeActiveAccount() {
@@ -121,6 +154,7 @@ class SoftphoneApp : Application() {
                         }
                     }
                     is CallEvent.CallEnded -> {
+                        SoftphoneConnection.onCallEnded(event.wasMissed)
                         SipForegroundService.stopService(this@SoftphoneApp)
                         if (settingsRepository.settings.value.recordCallHistory) {
                             val callType = when {

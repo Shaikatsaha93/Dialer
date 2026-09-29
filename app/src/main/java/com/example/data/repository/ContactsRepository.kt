@@ -12,24 +12,24 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 
-class ContactsRepository(private val context: Context) {
+class ContactsRepository(private val context: Context) : ContactsSource {
 
     private val _contacts = MutableStateFlow<List<PhoneContact>>(emptyList())
-    val contacts: StateFlow<List<PhoneContact>> = _contacts.asStateFlow()
+    override val contacts: StateFlow<List<PhoneContact>> = _contacts.asStateFlow()
 
     private val _isLoading = MutableStateFlow(false)
-    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+    override val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
     private val numberToNameMap = mutableMapOf<String, String>()
 
-    fun hasContactsPermission(): Boolean {
+    override fun hasContactsPermission(): Boolean {
         return ContextCompat.checkSelfPermission(
             context,
             android.Manifest.permission.READ_CONTACTS
         ) == PackageManager.PERMISSION_GRANTED
     }
 
-    suspend fun loadContacts() = withContext(Dispatchers.IO) {
+    override suspend fun loadContacts(): Unit = withContext<Unit>(Dispatchers.IO) {
         if (!hasContactsPermission()) {
             Log.d(TAG, "READ_CONTACTS permission not granted yet")
             return@withContext
@@ -123,7 +123,7 @@ class ContactsRepository(private val context: Context) {
         }
     }
 
-    fun findContactName(rawNumberOrUri: String): String? {
+    override fun findContactName(rawNumberOrUri: String): String? {
         val clean = normalizeNumber(rawNumberOrUri)
         if (clean.isBlank()) return null
 
