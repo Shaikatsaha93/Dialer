@@ -58,6 +58,7 @@ jobs:
           echo "$GOOGLE_SERVICES_B64" | base64 -d > app/google-services.json
           echo "KEYSTORE_PATH=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
 
+      # One APK per phone CPU type (about 13 MB each) plus a universal one (about 22 MB)
       - name: Build APK
         env:
           STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
@@ -65,20 +66,27 @@ jobs:
           KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
         run: |
           chmod +x gradlew
-          ./gradlew :app:assembleRelease --no-daemon
-          cp app/build/outputs/apk/release/app-release.apk Dialer.apk
+          ./gradlew :app:assembleRelease -PabiSplits --no-daemon
+          OUT=app/build/outputs/apk/release
+          cp "$OUT/app-universal-release.apk" Dialer.apk
+          cp "$OUT/app-arm64-v8a-release.apk" Dialer-arm64-v8a.apk
+          cp "$OUT/app-armeabi-v7a-release.apk" Dialer-armeabi-v7a.apk
 
       - name: update.json
         run: |
           # First lines of the latest commit message (also for runs started by hand)
           NOTES="$(git log -1 --format=%B | head -n 5)"
           echo "NOTES<<EOF" >> "$GITHUB_ENV"; echo "$NOTES" >> "$GITHUB_ENV"; echo "EOF" >> "$GITHUB_ENV"
+          BASE="https://github.com/${{ github.repository }}/releases/download/v$VERSION_NAME"
+          # apkUrl: universal APK (apps before 1.0.5 read only this); apks: one per CPU type
           jq -n \
             --argjson code "$VERSION_CODE" \
             --arg name "$VERSION_NAME" \
-            --arg url "https://github.com/${{ github.repository }}/releases/download/v$VERSION_NAME/Dialer.apk" \
+            --arg base "$BASE" \
             --arg notes "$NOTES" \
-            '{versionCode: $code, versionName: $name, apkUrl: $url, notes: $notes}' > update.json
+            '{versionCode: $code, versionName: $name, apkUrl: ($base + "/Dialer.apk"),
+              apks: {"arm64-v8a": ($base + "/Dialer-arm64-v8a.apk"), "armeabi-v7a": ($base + "/Dialer-armeabi-v7a.apk")},
+              notes: $notes}' > update.json
           cat update.json
 
       - name: Publish release
@@ -90,4 +98,6 @@ jobs:
           make_latest: true
           files: |
             Dialer.apk
+            Dialer-arm64-v8a.apk
+            Dialer-armeabi-v7a.apk
             update.json

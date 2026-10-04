@@ -62,7 +62,7 @@ class AppUpdater(private val context: Context) {
             val update = AppUpdate(
                 versionCode = o.getInt("versionCode"),
                 versionName = o.optString("versionName"),
-                apkUrl = o.getString("apkUrl"),
+                apkUrl = apkForThisPhone(o),
                 notes = o.optString("notes")
             )
             Log.i(TAG, "Latest release ${update.versionName} (${update.versionCode}), installed ${BuildConfig.VERSION_CODE}")
@@ -123,6 +123,20 @@ class AppUpdater(private val context: Context) {
             Log.w(TAG, "Update download failed: ${e.message}")
             _state.value = UpdateState.Failed(update, e.message ?: "Download failed")
         }
+    }
+
+    /**
+     * Releases carry one APK per CPU type ("apks": {"arm64-v8a": url, ...}), about half the size
+     * of the universal one; take the first this phone runs. "apkUrl" (universal) is the fallback.
+     */
+    private fun apkForThisPhone(o: JSONObject): String {
+        val apks = o.optJSONObject("apks")
+        if (apks != null) {
+            for (abi in Build.SUPPORTED_ABIS) {
+                apks.optString(abi).takeIf { it.isNotBlank() }?.let { return it }
+            }
+        }
+        return o.getString("apkUrl")
     }
 
     private fun open(url: String): HttpURLConnection {

@@ -9,6 +9,10 @@ plugins {
   alias(libs.plugins.google.services)
 }
 
+// -PabiSplits (the release workflow): one APK per phone CPU type plus a universal one, so each
+// phone downloads only the native code it runs (Linphone ships ~30 MB of it per CPU type)
+val abiSplits = providers.gradleProperty("abiSplits").isPresent
+
 android {
   namespace = "com.example"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
@@ -50,17 +54,31 @@ android {
       signingConfig = signingConfigs.getByName("release")
       // Real phones only: 64-bit ARM (almost every phone) and 32-bit ARM (old phones).
       // Linphone ships ~30 MB of native code per ABI, so x86/x86_64 would double the APK.
-      ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
+      if (!abiSplits) ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
     debug {
       signingConfig = signingConfigs.getByName("debugConfig")
       // Phones (arm64) and the x86_64 emulator
-      ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
+      if (!abiSplits) ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
+    }
+  }
+  splits {
+    abi {
+      isEnable = abiSplits
+      reset()
+      include("arm64-v8a", "armeabi-v7a")
+      // For phones whose app is older than per-CPU updates (they download update.json's apkUrl)
+      isUniversalApk = true
     }
   }
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_11
     targetCompatibility = JavaVersion.VERSION_11
+  }
+  androidResources {
+    // Linphone's sample ringtones (7.6 MB): calls ring with the phone's own ringtone
+    // (native ringing); the .wav tones (ringback, hold music) stay
+    ignoreAssetsPatterns += "!*.mkv"
   }
   buildFeatures {
     compose = true
@@ -70,6 +88,10 @@ android {
   packaging {
     jniLibs {
       excludes += "**/libmsandroidcamera2.so"
+      // Linphone's self-test library: nothing loads it (about 7 MB)
+      excludes += "**/liblinphonetester.so"
+      // Emulator-only CPU types stay out of the universal APK
+      if (abiSplits) excludes += listOf("lib/x86/**", "lib/x86_64/**")
       // Store native libs compressed in the APK (about half the download size);
       // Android extracts them once at install time.
       useLegacyPackaging = true
