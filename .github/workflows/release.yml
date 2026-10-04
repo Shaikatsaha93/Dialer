@@ -29,12 +29,14 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-latest
-    env:
-      # Must grow with every release: Android only installs a higher versionCode over the old app
-      VERSION_CODE: ${{ 100 + github.run_number }}
-      VERSION_NAME: 1.0.${{ github.run_number }}
     steps:
       - uses: actions/checkout@v4
+
+      # Must grow with every release: Android only installs a higher versionCode over the old app
+      - name: Version
+        run: |
+          echo "VERSION_CODE=$((100 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
+          echo "VERSION_NAME=1.0.$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
 
       - uses: actions/setup-java@v4
         with:
