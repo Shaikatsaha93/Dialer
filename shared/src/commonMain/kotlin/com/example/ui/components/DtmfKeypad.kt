@@ -3,6 +3,8 @@ package com.example.ui.components
 import androidx.compose.ui.graphics.Color
 import com.example.ui.theme.LocalGlassColors
 import com.example.ui.theme.glass
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -46,7 +48,9 @@ fun DtmfKeypad(
     modifier: Modifier = Modifier,
     hapticFeedbackEnabled: Boolean = true,
     keySize: Dp = 72.dp,
-    spacing: Dp = 16.dp
+    spacing: Dp = 16.dp,
+    /** Long press, e.g. 0 for "+" on the dial pad; null = long press acts like a tap */
+    onKeyLongPressed: ((Char) -> Boolean)? = null
 ) {
     val haptic = LocalHapticFeedback.current
 
@@ -72,6 +76,17 @@ fun DtmfKeypad(
                                 } catch (_: Throwable) {}
                             }
                             onKeyPressed(key.char)
+                        },
+                        onLongClick = {
+                            if (onKeyLongPressed?.invoke(key.char) == true) {
+                                if (hapticFeedbackEnabled) {
+                                    try {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    } catch (_: Throwable) {}
+                                }
+                            } else {
+                                onKeyPressed(key.char)
+                            }
                         }
                     )
                 }
@@ -80,18 +95,21 @@ fun DtmfKeypad(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun KeypadButton(
     key: KeypadKey,
     size: Dp,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onLongClick: (() -> Unit)? = null
 ) {
     Surface(
-        onClick = onClick,
         modifier = modifier
             .size(size)
             .glass(CircleShape, LocalGlassColors.current)
+            .clip(CircleShape)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .testTag("dialer_key_${key.char}"),
         shape = CircleShape,
         color = Color.Transparent

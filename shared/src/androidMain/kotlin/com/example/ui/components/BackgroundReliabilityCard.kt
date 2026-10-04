@@ -75,6 +75,15 @@ actual fun BackgroundReliabilityCard(modifier: Modifier) {
             testTag = "btn_full_screen_intent",
             onFix = { open(BackgroundReliability.fullScreenIntentSettings(context)) }
         )
+        val autostart = remember { BackgroundReliability.oemAutostartIntent(context) }
+        if (autostart != null) {
+            FilledTonalButton(
+                onClick = { open(autostart) },
+                modifier = Modifier.testTag("btn_oem_autostart")
+            ) {
+                Text("Open Auto-launch settings", fontSize = 12.sp)
+            }
+        }
         Text(
             text = "Xiaomi, Oppo, Vivo, Realme, Samsung: also turn on Autostart / \"Allow background activity\" for this app in its App info.",
             style = MaterialTheme.typography.bodySmall,

@@ -151,7 +151,7 @@ The glass panels are translucent but do not blur the content behind them. The ba
 3. Put your `google-services.json` in `app/`.
 4. Run the `app` configuration on a device or emulator.
 
-The Gradle wrapper scripts (`gradlew`, `gradlew.bat`, `gradle-wrapper.jar`) are not in the repository yet. Android Studio creates them, or you can run `gradle wrapper` once. After that you can build from the command line:
+Build from the command line with the Gradle wrapper:
 
 ```bash
 ./gradlew :app:assembleDebug        # build the APK
@@ -161,9 +161,30 @@ The Gradle wrapper scripts (`gradlew`, `gradlew.bat`, `gradle-wrapper.jar`) are 
 ### Signing
 
 - **Debug** builds use `debug.keystore` in the project root. It is not committed; add your own.
-- **Release** builds read the keystore from the `KEYSTORE_PATH` environment variable (default `my-upload-key.jks` in the project root), with `STORE_PASSWORD` and `KEY_PASSWORD` for the passwords.
+- **Release** builds read the keystore from the `KEYSTORE_PATH` environment variable (default `my-upload-key.jks` in the project root), with `STORE_PASSWORD`, `KEY_ALIAS` (default `upload`) and `KEY_PASSWORD`.
+- `VERSION_CODE` and `VERSION_NAME` set the app version (default `1` / `1.0`). The release workflow sets them.
 
 If a device already has the app signed with a different key, Android refuses the update. Uninstall the old app first; this deletes its saved accounts and history.
+
+### Automatic updates
+
+Every push to `main` that changes the app (`app/`, `shared/`, Gradle files) runs the **Release APK** workflow (`.github/workflows/release.yml`). It builds a signed APK and publishes it as the newest [GitHub release](https://github.com/Shaikatsaha93/Dialer/releases), together with `update.json`. It can also be started by hand from the **Actions** tab (**Run workflow**).
+
+When the app is opened (at most once an hour) it reads `update.json` from the latest release. If that version is newer, it shows **Update available**. **Update** downloads the APK and opens Android's install screen; accounts and history are kept. The first time, Android asks to allow installs from this app.
+
+The workflow needs these repository secrets (**Settings → Secrets and variables → Actions**):
+
+| Secret | Value |
+|---|---|
+| `SIGNING_KEYSTORE_BASE64` | The keystore the installed APKs were signed with, base64-encoded |
+| `SIGNING_STORE_PASSWORD` | Keystore password |
+| `SIGNING_KEY_ALIAS` | Key alias |
+| `SIGNING_KEY_PASSWORD` | Key password |
+| `GOOGLE_SERVICES_JSON_BASE64` | `app/google-services.json`, base64-encoded |
+
+The repository must be public: the app downloads updates without a GitHub login. Every release must be signed with the same keystore, or Android refuses the update.
+
+Work that is not ready for users goes on another branch. Merge it into `main` when it should ship.
 
 ## Configure a SIP account
 

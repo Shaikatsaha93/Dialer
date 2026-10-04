@@ -50,6 +50,12 @@ interface LinphoneNative : Library {
     fun linphone_core_enable_ipv6(core: Pointer, enable: Byte)
     fun linphone_core_set_mic_gain_db(core: Pointer, level: Float)
     fun linphone_core_set_stun_server(core: Pointer, server: String?)
+    fun linphone_core_get_nat_policy(core: Pointer): Pointer?
+    fun linphone_core_create_nat_policy(core: Pointer): Pointer
+    fun linphone_core_set_nat_policy(core: Pointer, policy: Pointer)
+    fun linphone_nat_policy_set_stun_server(policy: Pointer, server: String?)
+    fun linphone_nat_policy_enable_stun(policy: Pointer, enable: Byte)
+    fun linphone_nat_policy_enable_ice(policy: Pointer, enable: Byte)
     fun linphone_core_enable_mic(core: Pointer, enable: Byte)
     fun linphone_core_set_play_file(core: Pointer, file: String?)
     fun linphone_core_set_ring(core: Pointer, path: String?)

@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Files the app may share with other apps (call recordings) -->
+<!-- Files the app may share with other apps (call recordings, downloaded updates) -->
 <paths>
     <external-files-path name="recordings" path="Recordings/" />
     <files-path name="recordings_internal" path="Recordings/" />
+    <external-cache-path name="updates" path="updates/" />
+    <cache-path name="updates_internal" path="updates/" />
 </paths>

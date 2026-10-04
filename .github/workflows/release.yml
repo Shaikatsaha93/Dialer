@@ -1,0 +1,90 @@
+# Builds a signed APK on every push to main and publishes it as the latest GitHub release.
+# The app (AppUpdater) reads update.json from the latest release and offers the new version
+# to every user. Repository secrets it needs (Settings > Secrets and variables > Actions):
+#   SIGNING_KEYSTORE_BASE64     base64 of the keystore every earlier APK was signed with
+#   SIGNING_STORE_PASSWORD      keystore password
+#   SIGNING_KEY_ALIAS           key alias in the keystore
+#   SIGNING_KEY_PASSWORD        key password
+#   GOOGLE_SERVICES_JSON_BASE64 base64 of app/google-services.json (Firebase)
+name: Release APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "shared/**"
+      - "gradle/**"
+      - "*.gradle.kts"
+      - ".github/workflows/release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      # Must grow with every release: Android only installs a higher versionCode over the old app
+      VERSION_CODE: ${{ 100 + github.run_number }}
+      VERSION_NAME: 1.0.${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Signing key and Firebase config
+        env:
+          KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+          GOOGLE_SERVICES_B64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ] || [ -z "$GOOGLE_SERVICES_B64" ]; then
+            echo "::error::Add the SIGNING_* and GOOGLE_SERVICES_JSON_BASE64 repository secrets first"
+            exit 1
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          echo "$GOOGLE_SERVICES_B64" | base64 -d > app/google-services.json
+          echo "KEYSTORE_PATH=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+
+      - name: Build APK
+        env:
+          STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease --no-daemon
+          cp app/build/outputs/apk/release/app-release.apk Dialer.apk
+
+      - name: update.json
+        env:
+          NOTES: ${{ github.event.head_commit.message }}
+        run: |
+          jq -n \
+            --argjson code "$VERSION_CODE" \
+            --arg name "$VERSION_NAME" \
+            --arg url "https://github.com/${{ github.repository }}/releases/download/v$VERSION_NAME/Dialer.apk" \
+            --arg notes "$(printf '%s' "$NOTES" | head -n 5)" \
+            '{versionCode: $code, versionName: $name, apkUrl: $url, notes: $notes}' > update.json
+          cat update.json
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION_NAME }}
+          name: Dialer ${{ env.VERSION_NAME }}
+          body: ${{ github.event.head_commit.message }}
+          make_latest: true
+          files: |
+            Dialer.apk
+            update.json

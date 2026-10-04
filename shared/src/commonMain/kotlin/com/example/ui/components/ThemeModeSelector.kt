@@ -37,7 +37,9 @@ import com.example.data.model.AppThemeMode
 fun ThemeModeSelector(
     currentMode: AppThemeMode,
     onModeSelected: (AppThemeMode) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** Icons only, for headers with little room */
+    compact: Boolean = false
 ) {
     Surface(
         modifier = modifier
@@ -55,16 +57,19 @@ fun ThemeModeSelector(
             ThemeOption(
                 mode = AppThemeMode.SYSTEM,
                 isSelected = currentMode == AppThemeMode.SYSTEM,
+                compact = compact,
                 onClick = { onModeSelected(AppThemeMode.SYSTEM) }
             )
             ThemeOption(
                 mode = AppThemeMode.LIGHT,
                 isSelected = currentMode == AppThemeMode.LIGHT,
+                compact = compact,
                 onClick = { onModeSelected(AppThemeMode.LIGHT) }
             )
             ThemeOption(
                 mode = AppThemeMode.DARK,
                 isSelected = currentMode == AppThemeMode.DARK,
+                compact = compact,
                 onClick = { onModeSelected(AppThemeMode.DARK) }
             )
         }
@@ -75,6 +80,7 @@ fun ThemeModeSelector(
 private fun ThemeOption(
     mode: AppThemeMode,
     isSelected: Boolean,
+    compact: Boolean,
     onClick: () -> Unit
 ) {
     val backgroundColor by animateColorAsState(
@@ -108,7 +114,7 @@ private fun ThemeOption(
             .clip(RoundedCornerShape(10.dp))
             .background(backgroundColor)
             .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 6.dp)
+            .padding(horizontal = if (compact) 8.dp else 10.dp, vertical = 6.dp)
             .testTag("theme_mode_btn_${mode.name.lowercase()}"),
         contentAlignment = Alignment.Center
     ) {
@@ -119,16 +125,20 @@ private fun ThemeOption(
                 imageVector = icon,
                 contentDescription = mode.label,
                 tint = contentColor,
-                modifier = Modifier.size(15.dp)
+                modifier = Modifier.size(if (compact) 18.dp else 15.dp)
             )
-            Spacer(modifier = Modifier.width(4.dp))
-            Text(
-                text = mode.label,
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                color = contentColor,
-                fontSize = 11.sp
-            )
+            if (!compact) {
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = mode.label,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                    color = contentColor,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
         }
     }
 }

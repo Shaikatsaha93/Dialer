@@ -113,7 +113,9 @@ fun AccountConfigScreen(
     var displayName by remember { mutableStateOf("") }
     var selectedTransport by remember { mutableStateOf(SipTransport.UDP) }
     var passwordVisible by remember { mutableStateOf(false) }
-    var showForm by remember { mutableStateOf(allAccounts.isEmpty()) }
+    // The list loads after the first frame, so "empty" here does not mean there are no accounts;
+    // the form still shows by itself while the list is really empty (see visible = ... below)
+    var showForm by remember { mutableStateOf(false) }
     // Id of the account being edited; null = the form adds a new account
     var editingId by remember { mutableStateOf<Long?>(null) }
 
@@ -531,12 +533,11 @@ private fun ThemeSelectorCard(
             MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
         )
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 14.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Column {
                 Text(
@@ -848,13 +849,6 @@ private fun AddAccountFormCard(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    OutlinedButton(
-                        onClick = onFillDemo,
-                        modifier = Modifier.testTag("fill_demo_credentials_btn")
-                    ) {
-                        Text("Fill Demo", fontSize = 12.sp)
-                    }
-
                     // Direct Close Button in Form Header
                     IconButton(
                         onClick = onClose,

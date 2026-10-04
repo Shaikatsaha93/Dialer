@@ -20,6 +20,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
@@ -200,11 +201,15 @@ private fun Avatar(conversation: ChatConversation) {
             .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f), CircleShape),
         contentAlignment = Alignment.Center
     ) {
+        val initial = conversation.title.firstOrNull { it.isLetter() }
         if (conversation.isGroup) {
             Icon(Icons.Default.Groups, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        } else if (initial == null || !conversation.title.first().isLetter()) {
+            // A phone number: a person icon reads better than its first digit
+            Icon(Icons.Default.Person, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
         } else {
             Text(
-                conversation.title.firstOrNull()?.uppercase() ?: "?",
+                initial.uppercase(),
                 color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.Bold,
                 style = MaterialTheme.typography.titleMedium

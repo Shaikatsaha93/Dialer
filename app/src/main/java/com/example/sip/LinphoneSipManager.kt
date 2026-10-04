@@ -5,6 +5,7 @@ import android.media.AudioManager
 import android.util.Log
 import com.example.data.model.AccountBalance
 import com.example.data.repository.CallRecordings
+import com.example.data.repository.SettingsRepository
 import com.example.data.model.AppSettings
 import com.example.data.model.CallState
 import com.example.data.model.ConferenceParticipant
@@ -113,6 +114,16 @@ class LinphoneSipManager(
     private val dtmfTonePlayer = DtmfTonePlayer()
 
     private val coreListener: CoreListener = object : CoreListenerStub() {
+        // A Bluetooth or wired headset was connected or removed: move the call audio to it (or
+        // back to the phone), the way the built-in phone app does
+        override fun onAudioDevicesListUpdated(core: Core) {
+            if (_callState.value !is CallState.Connected) return
+            Log.i(TAG, "Audio devices changed: " + core.audioDevices.joinToString { "${it.type}" })
+            try { applyAudioRoute(core, _isSpeakerOn.value) } catch (e: Throwable) {
+                Log.w(TAG, "Audio route: ${e.message}")
+            }
+        }
+
         override fun onMessageReceived(core: Core, chatRoom: ChatRoom, message: ChatMessage) {
             val text = message.utf8Text ?: return
             val fromAddress = message.fromAddress
@@ -361,6 +372,11 @@ class LinphoneSipManager(
                     // StreamsRunning repeats after every re-INVITE; don't reset the timer each time
                     if (_callState.value !is CallState.Connected) {
                         startDurationTimer()
+                        // Choose the speaker and microphone ourselves instead of trusting each
+                        // phone's default (see applyAudioRoute)
+                        try { applyAudioRoute(core, _isSpeakerOn.value) } catch (e: Throwable) {
+                            Log.w(TAG, "Audio route: ${e.message}")
+                        }
                     }
                     val existingConnected = _callState.value as? CallState.Connected
                     _callState.value = CallState.Connected(
@@ -594,12 +610,27 @@ class LinphoneSipManager(
             )
             preferred.firstNotNullOfOrNull { type -> playable.firstOrNull { it.type == type } }
         } ?: return
+        // Pick the microphone that belongs to the output: a Bluetooth or wired headset's own mic,
+        // otherwise the phone's. Left to itself, some phones pick a capture device that records
+        // silence (e.g. the "telephony" one), and the other side hears nothing.
+        val recordable = c.audioDevices.filter { it.hasCapability(AudioDevice.Capabilities.CapabilityRecord) }
+        val input = when {
+            !speaker && device.type == AudioDevice.Type.Bluetooth ->
+                recordable.firstOrNull { it.type == AudioDevice.Type.Bluetooth }
+            !speaker && device.type == AudioDevice.Type.Headset ->
+                recordable.firstOrNull { it.type == AudioDevice.Type.Headset }
+            else -> null
+        } ?: recordable.firstOrNull { it.type == AudioDevice.Type.Microphone }
         val conf = c.conference
         if (conf != null && conf.isIn) {
             conf.outputAudioDevice = device
+            if (input != null) conf.inputAudioDevice = input
         } else {
             c.outputAudioDevice = device
+            if (input != null) c.inputAudioDevice = input
         }
+        Log.i(TAG, "Audio route: out=${device.type}/${device.deviceName} in=${input?.type}/${input?.deviceName}")
+        _diagnosticLogs.value = (_diagnosticLogs.value + "[Audio] Route: ${device.type} / mic ${input?.type ?: "default"}").takeLast(50)
     }
 
     override fun initializeSdk() {
@@ -671,6 +702,9 @@ class LinphoneSipManager(
 
             try {
                 newCore.isKeepAliveEnabled = true
+                // A short network drop (lift, Wi-Fi to mobile data handover) must not end the call:
+                // wait 60 s without voice packets before hanging up (default 30 s)
+                newCore.nortpTimeout = 60
             } catch (_: Throwable) {}
 
             // Ensure network is active so Linphone sockets can send REGISTER packets
@@ -754,12 +788,7 @@ class LinphoneSipManager(
             c.isAdaptiveRateControlEnabled = settings.adaptiveRateControl
             c.isIpv6Enabled = settings.ipv6Enabled
             c.micGainDb = if (settings.micGainBoost) 6.0f else 0.0f
-            if (settings.stunEnabled && settings.stunServer.isNotBlank()) {
-                c.stunServer = settings.stunServer
-                c.natPolicy?.stunServer = settings.stunServer
-            } else {
-                c.stunServer = null
-            }
+            applyNatPolicy(c, settings)
             _diagnosticLogs.value = (_diagnosticLogs.value + "[Audio] Echo canceller: " + (if (builtinAec) "phone's built-in" else if (settings.echoCancellation) "software" else "off") + ", jitter buffer 40 ms adaptive").takeLast(50)
             Log.d(TAG, "Applied audio/network settings: AEC=${settings.echoCancellation}, builtinAEC=$builtinAec, AdaptiveRate=${settings.adaptiveRateControl}, IPv6=${settings.ipv6Enabled}")
         } catch (e: Throwable) {
@@ -767,10 +796,43 @@ class LinphoneSipManager(
         }
     }
 
+    /**
+     * STUN: before a call the phone asks the STUN server for its public IP and port and puts that
+     * in the SDP instead of the Wi-Fi address (e.g. 192.168.1.x), which the PBX cannot reach.
+     * Setting only the server address is not enough: the policy's STUN switch must be on too.
+     * ICE stays off: most PBXs (Asterisk without icesupport, iTelSwitch) ignore it and it only
+     * delays the call setup.
+     */
+    private fun applyNatPolicy(c: Core, settings: AppSettings) {
+        val server = settings.stunServer.trim().ifBlank { SettingsRepository.DEFAULT_STUN }
+        val policy = c.natPolicy ?: c.createNatPolicy()
+        policy.stunServer = server
+        policy.isStunEnabled = settings.stunEnabled
+        policy.isIceEnabled = false
+        policy.isTurnEnabled = false
+        policy.isUpnpEnabled = false
+        c.natPolicy = policy
+        c.stunServer = if (settings.stunEnabled) server else null
+        val line = if (settings.stunEnabled) "[Network] STUN on ($server): calls use the public IP" else "[Network] STUN off: calls use the local IP"
+        Log.i(TAG, line)
+        _diagnosticLogs.value = (_diagnosticLogs.value + line).takeLast(50)
+    }
+
     override fun registerAccount(account: SipAccount) {
-        activeAccountModel = account
         initializeSdk()
         val c = core
+        // Same account already registered (or registering): keep it. Re-creating it unregisters
+        // first, and a call arriving in that gap is lost. The app start, the settings screen and
+        // a saved edit all ask for registration, often for the same account.
+        val previous = activeAccountModel
+        if (c != null && previous != null && sameLogin(previous, account) && c.accountList.isNotEmpty() &&
+            (_registrationState.value == RegistrationStatus.REGISTERED || _registrationState.value == RegistrationStatus.REGISTERING)
+        ) {
+            activeAccountModel = account
+            c.ensureRegistered()
+            return
+        }
+        activeAccountModel = account
         if (c == null) {
             // Simulated registration fallback for testing when native library is absent
             simulateRegistration(account)
@@ -885,6 +947,13 @@ class LinphoneSipManager(
             accountParams.isRegisterEnabled = true
             accountParams.expires = 300
             accountParams.isOutboundProxyEnabled = false
+            // No push parameters in the Contact: neither PBX sends FCM pushes, and the long token
+            // (~250 bytes) made every INVITE to the phone bigger. Over mobile data a UDP packet above
+            // ~1300 bytes gets fragmented, and lost fragments = an incoming call that never rings.
+            try {
+                accountParams.pushNotificationAllowed = false
+                accountParams.remotePushNotificationAllowed = false
+            } catch (_: Throwable) {}
             try {
                 accountParams.isDialEscapePlusEnabled = false
                 accountParams.useInternationalPrefixForCallsAndChats = false
@@ -902,6 +971,10 @@ class LinphoneSipManager(
             _diagnosticLogs.value = (_diagnosticLogs.value + "[Error] Config error: ${e.message}").takeLast(50)
         }
     }
+
+    private fun sameLogin(a: SipAccount, b: SipAccount) =
+        a.username.trim() == b.username.trim() && a.password == b.password && a.domain.trim() == b.domain.trim() &&
+            a.port == b.port && a.transport == b.transport && a.displayName == b.displayName
 
     private fun simulateRegistration(account: SipAccount) {
         scope.launch {
@@ -992,7 +1065,7 @@ class LinphoneSipManager(
                 // Re-REGISTERs only if the registration is not currently OK
                 c.ensureRegistered()
             }
-            _diagnosticLogs.value = (_diagnosticLogs.value + "[FCM] Call push: ensuring SIP registration").takeLast(50)
+            _diagnosticLogs.value = (_diagnosticLogs.value + "[SIP] Checking registration").takeLast(50)
         }
     }
 

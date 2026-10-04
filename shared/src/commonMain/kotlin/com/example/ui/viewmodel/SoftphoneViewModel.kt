@@ -165,14 +165,9 @@ class SoftphoneViewModel(
         if (filter == null) logs else logs.filter { it.callType == filter }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    // Registration of the active account is done once, app-wide (SoftphoneApp on Android,
+    // Main.kt on Windows), and only while the install is approved; not again per screen.
     init {
-        viewModelScope.launch {
-            accountRepository.activeAccount.collect { account ->
-                if (account != null && account.isActive) {
-                    sipManager.registerAccount(account)
-                }
-            }
-        }
         viewModelScope.launch {
             settings.collect { currentSettings ->
                 sipManager.applySettings(currentSettings)
@@ -189,6 +184,61 @@ class SoftphoneViewModel(
     fun clearLogs() {
         sipManager.clearLogs()
     }
+
+    /**
+     * The list above the dial pad, as on a phone's own dialer. Nothing typed: every recent call,
+     * newest first, with back-to-back calls of one number folded into one row ("(3)"). While
+     * typing: all recent numbers and phone contacts whose number contains the typed digits.
+     */
+    val dialSuggestions: StateFlow<List<DialSuggestion>> = combine(
+        _dialerInput,
+        callLogRepository.allLogs,
+        contactsRepository.contacts
+    ) { input, logs, contacts ->
+        val typed = input.filter { it.isDigit() }
+        val calls = logs.asSequence()
+            .map { DialSuggestion(dialNumberOf(it.remoteUri), it.displayName, it.callType, it.timestamp) }
+            .filter { it.number.any(Char::isDigit) }
+        if (typed.isEmpty()) {
+            val rows = ArrayList<DialSuggestion>()
+            for (call in calls) {
+                val last = rows.lastOrNull()
+                if (last != null && sameNumber(last.number, call.number)) {
+                    rows[rows.lastIndex] = last.copy(count = last.count + 1)
+                } else {
+                    if (rows.size == MAX_RECENT_ROWS) break
+                    rows += call
+                }
+            }
+            rows
+        } else {
+            val fromContacts = contacts.asSequence().flatMap { contact ->
+                contact.allNumbers.asSequence().map {
+                    DialSuggestion(it.filter { c -> c.isDigit() || c == '+' }, contact.name, null, null)
+                }
+            }
+            (calls + fromContacts)
+                .filter { it.number.filter(Char::isDigit).contains(typed) && it.number != input }
+                .distinctBy { it.number.filter(Char::isDigit).takeLast(10) }
+                .take(MAX_RECENT_ROWS)
+                .toList()
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // 01712345678 and +8801712345678 are the same phone
+    private fun sameNumber(a: String, b: String) =
+        a.filter(Char::isDigit).takeLast(10) == b.filter(Char::isDigit).takeLast(10)
+
+    /** The last number this phone dialed, for "call" with an empty dial pad (redial). */
+    val lastDialedNumber: StateFlow<String?> = callLogRepository.allLogs
+        .map { logs ->
+            logs.asSequence().filter { it.callType == CallType.OUTGOING }
+                .map { dialNumberOf(it.remoteUri) }.firstOrNull { it.any(Char::isDigit) }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    private fun dialNumberOf(remoteUri: String): String =
+        remoteUri.removePrefix("sip:").removePrefix("sips:").substringBefore("@").substringBefore(";")
 
     fun onDialerChar(char: Char) {
         if (settings.value.dtmfKeypadSound) {
@@ -314,3 +364,17 @@ class SoftphoneViewModel(
         }
     }
 }
+
+/**
+ * A row above the dial pad. [callType] and [timestamp] are null for a phone contact; [count] is
+ * how many calls in a row this one stands for.
+ */
+data class DialSuggestion(
+    val number: String,
+    val name: String,
+    val callType: CallType?,
+    val timestamp: Long?,
+    val count: Int = 1
+)
+
+private const val MAX_RECENT_ROWS = 200

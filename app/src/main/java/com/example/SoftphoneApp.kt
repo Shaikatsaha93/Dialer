@@ -46,6 +46,7 @@ class SoftphoneApp : Application() {
         private set
     lateinit var telecomHelper: TelecomHelper
         private set
+    val appUpdater by lazy { com.example.update.AppUpdater(this) }
     lateinit var fcmTokenManager: FcmTokenManager
         private set
     lateinit var contactsRepository: com.example.data.repository.ContactsRepository
@@ -149,7 +150,7 @@ class SoftphoneApp : Application() {
                 when (event) {
                     is CallEvent.CallStarted -> {
                         startServiceSafely { SipForegroundService.startService(this@SoftphoneApp) }
-                        if (event.isIncoming) {
+                        if (event.isIncoming && settingsRepository.settings.value.androidCallIntegration) {
                             telecomHelper.reportIncomingCall(event.remoteUri, event.displayName)
                         }
                     }

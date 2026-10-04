@@ -18,7 +18,8 @@ data class AppSettings(
     // Network & SIP Protocol
     val keepAliveEnabled: Boolean = true,
     val keepAliveIntervalSeconds: Int = 30,
-    val stunEnabled: Boolean = false,
+    /** On by default: puts the public IP in the call's SDP, so the PBX can send the voice back. */
+    val stunEnabled: Boolean = true,
     val stunServer: String = "stun.l.google.com:19302",
     val ipv6Enabled: Boolean = false,
 
@@ -26,6 +27,11 @@ data class AppSettings(
     val backgroundKeepAlive: Boolean = true,
     val wakeLockEnabled: Boolean = true,
     val showOnLockScreen: Boolean = true,
+    /**
+     * Hand incoming calls to Android's call system (Telecom). Some phones mute the microphone or
+     * speaker of a VoIP call while Telecom holds it; turning this off lets the app own the audio.
+     */
+    val androidCallIntegration: Boolean = true,
 
     // Firebase Cloud Messaging (FCM)
     val fcmPushEnabled: Boolean = true,

@@ -1,6 +1,8 @@
 package com.example.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -26,28 +28,45 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Backspace
+import androidx.compose.material.icons.automirrored.filled.CallMade
+import androidx.compose.material.icons.automirrored.filled.CallMissed
+import androidx.compose.material.icons.automirrored.filled.CallReceived
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material.icons.filled.Dialpad
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PhoneInTalk
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Card
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -59,13 +78,16 @@ import com.example.ui.theme.LocalGlassColors
 import com.example.ui.theme.glass
 import com.example.data.model.AccountBalance
 import com.example.data.model.AppThemeMode
+import com.example.data.model.CallType
 import com.example.data.model.CallState
 import com.example.data.model.RegistrationStatus
 import com.example.data.model.SipAccount
+import com.example.platform.relativeTime
 import com.example.ui.components.DtmfKeypad
 import com.example.ui.components.ThemeModeSelector
 import com.example.ui.theme.CallActionGreen
 import com.example.ui.theme.CallActionRed
+import com.example.ui.viewmodel.DialSuggestion
 import com.example.ui.viewmodel.SoftphoneViewModel
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -83,8 +105,42 @@ fun DialerScreen(
     val callState by viewModel.callState.collectAsStateWithLifecycle()
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val suggestions by viewModel.dialSuggestions.collectAsStateWithLifecycle()
+    val lastDialed by viewModel.lastDialedNumber.collectAsStateWithLifecycle()
+    val clipboard = LocalClipboardManager.current
+
+    fun call(number: String) {
+        viewModel.initiateCall(number)
+        onNavigateToActiveCall()
+    }
+    val onCall: () -> Unit = {
+        val redial = lastDialed
+        when {
+            // At least one digit: "+" or "*" alone is not a number (the switch answers Forbidden)
+            dialerInput.any { it.isDigit() } -> call(dialerInput)
+            dialerInput.isNotEmpty() -> Unit
+            // Empty pad: the first tap fills in the last dialed number, like a desk phone's redial
+            redial != null -> viewModel.setDialerInput(redial)
+        }
+    }
+    // Copied numbers often carry spaces or dashes (017-1234 5678): keep what can be dialed
+    val onPaste: () -> Unit = {
+        val text = clipboard.getText()?.text.orEmpty()
+        val number = text.filter { it.isDigit() || it in "+*#" }
+        if (number.isNotEmpty()) viewModel.setDialerInput(number)
+    }
+    // Long-press 0 types "+" (international numbers)
+    val onKeyLongPressed: (Char) -> Boolean = { key ->
+        if (key == '0') {
+            viewModel.setDialerInput(dialerInput + "+")
+            true
+        } else {
+            false
+        }
+    }
 
     val isCallActive = callState !is CallState.Idle && callState !is CallState.Disconnected
+    var keypadOpen by rememberSaveable { mutableStateOf(true) }
     val matchedContactName = if (dialerInput.isNotBlank()) viewModel.getContactNameForUri(dialerInput) else null
 
     val infiniteTransition = rememberInfiniteTransition(label = "PulseAnimation")
@@ -117,7 +173,7 @@ fun DialerScreen(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight(),
-                    verticalArrangement = Arrangement.SpaceEvenly,
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     DialerTopBar(
@@ -144,19 +200,21 @@ fun DialerScreen(
                         isCompactHeight = false
                     )
 
+                    RecentCallsList(
+                        suggestions = suggestions,
+                        typing = dialerInput.isNotEmpty(),
+                        listState = rememberLazyListState(),
+                        onPick = { viewModel.setDialerInput(it.number) },
+                        onCall = { call(it.number) },
+                        modifier = Modifier.weight(1f)
+                    )
+
                     CallActionsRow(
                         dialerInput = dialerInput,
                         activeAccount = activeAccount,
                         isCompactHeight = false,
-                        onSimulateCall = { viewModel.simulateIncomingCall() },
-                        onCall = {
-                            if (dialerInput.isNotBlank()) {
-                                viewModel.initiateCall()
-                                onNavigateToActiveCall()
-                            } else if (activeAccount != null) {
-                                viewModel.setDialerInput("1002")
-                            }
-                        },
+                        onPaste = onPaste,
+                        onCall = onCall,
                         onBackspace = { viewModel.onBackspace() },
                         onClearAll = { viewModel.setDialerInput("") }
                     )
@@ -187,7 +245,8 @@ fun DialerScreen(
                                 hapticFeedbackEnabled = settings.dtmfHapticFeedback,
                                 modifier = Modifier.fillMaxWidth(),
                                 keySize = 72.dp,
-                                spacing = 14.dp
+                                spacing = 14.dp,
+                                onKeyLongPressed = onKeyLongPressed
                             )
                         }
                     }
@@ -195,7 +254,11 @@ fun DialerScreen(
             }
         } else {
             // Standard Phones and Foldable Cover Screens
-            val keypadKeySize = if (isCompactHeight) 58.dp else 68.dp
+            val keypadKeySize = when {
+                isCompactHeight -> 58.dp
+                screenHeight > 780.dp -> 74.dp
+                else -> 68.dp
+            }
             val keypadSpacing = if (isCompactHeight) 8.dp else 12.dp
             val verticalPadding = if (isCompactHeight) 6.dp else 12.dp
 
@@ -225,42 +288,101 @@ fun DialerScreen(
                     onClick = onNavigateToActiveCall
                 )
 
-                Spacer(modifier = Modifier.weight(0.1f))
-
-                NumberDisplayField(
-                    dialerInput = dialerInput,
-                    matchedContactName = matchedContactName,
-                    isCompactHeight = isCompactHeight
-                )
-
-                Spacer(modifier = Modifier.height(if (isCompactHeight) 8.dp else 12.dp))
-
-                DtmfKeypad(
-                    onKeyPressed = { char -> viewModel.onDialerChar(char) },
-                    hapticFeedbackEnabled = settings.dtmfHapticFeedback,
-                    modifier = Modifier.fillMaxWidth(),
-                    keySize = keypadKeySize,
-                    spacing = keypadSpacing
-                )
-
-                Spacer(modifier = Modifier.height(if (isCompactHeight) 10.dp else 14.dp))
-
-                CallActionsRow(
-                    dialerInput = dialerInput,
-                    activeAccount = activeAccount,
-                    isCompactHeight = isCompactHeight,
-                    onSimulateCall = { viewModel.simulateIncomingCall() },
-                    onCall = {
-                        if (dialerInput.isNotBlank()) {
-                            viewModel.initiateCall()
-                            onNavigateToActiveCall()
-                        } else if (activeAccount != null) {
-                            viewModel.setDialerInput("1002")
+                // Recent calls fill the screen like a phone's own dialer. Scrolling the list puts
+                // the dial pad away; the dial pad button brings it back.
+                val listState = rememberLazyListState()
+                LaunchedEffect(listState) {
+                    snapshotFlow { listState.isScrollInProgress }.collect { scrolling ->
+                        if (scrolling) keypadOpen = false
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(top = 6.dp)
+                ) {
+                    RecentCallsList(
+                        suggestions = suggestions,
+                        typing = dialerInput.isNotEmpty(),
+                        listState = listState,
+                        onPick = {
+                            viewModel.setDialerInput(it.number)
+                            keypadOpen = true
+                        },
+                        onCall = { call(it.number) },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    if (!keypadOpen) {
+                        FloatingActionButton(
+                            onClick = { keypadOpen = true },
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                            shape = CircleShape,
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(bottom = 8.dp, end = 4.dp)
+                                .size(60.dp)
+                                .testTag("dialer_show_keypad")
+                        ) {
+                            Icon(Icons.Default.Dialpad, contentDescription = "Show dial pad", modifier = Modifier.size(28.dp))
                         }
-                    },
-                    onBackspace = { viewModel.onBackspace() },
-                    onClearAll = { viewModel.setDialerInput("") }
-                )
+                    }
+                }
+
+                AnimatedVisibility(
+                    visible = keypadOpen,
+                    enter = expandVertically(expandFrom = Alignment.Top),
+                    exit = shrinkVertically(shrinkTowards = Alignment.Top)
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        // Handle: tap to put the dial pad away and see the whole list
+                        Surface(
+                            onClick = { keypadOpen = false },
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color.Transparent,
+                            modifier = Modifier.testTag("dialer_hide_keypad")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.KeyboardArrowDown,
+                                contentDescription = "Hide dial pad",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier
+                                    .padding(horizontal = 24.dp, vertical = 2.dp)
+                                    .size(26.dp)
+                            )
+                        }
+
+                        NumberDisplayField(
+                            dialerInput = dialerInput,
+                            matchedContactName = matchedContactName,
+                            isCompactHeight = isCompactHeight
+                        )
+
+                        Spacer(modifier = Modifier.height(if (isCompactHeight) 8.dp else 12.dp))
+
+                        DtmfKeypad(
+                            onKeyPressed = { char -> viewModel.onDialerChar(char) },
+                            hapticFeedbackEnabled = settings.dtmfHapticFeedback,
+                            modifier = Modifier.fillMaxWidth(),
+                            keySize = keypadKeySize,
+                            spacing = keypadSpacing,
+                            onKeyLongPressed = onKeyLongPressed
+                        )
+
+                        Spacer(modifier = Modifier.height(if (isCompactHeight) 10.dp else 14.dp))
+
+                        CallActionsRow(
+                            dialerInput = dialerInput,
+                            activeAccount = activeAccount,
+                            isCompactHeight = isCompactHeight,
+                            onPaste = onPaste,
+                            onCall = onCall,
+                            onBackspace = { viewModel.onBackspace() },
+                            onClearAll = { viewModel.setDialerInput("") }
+                        )
+                    }
+                }
 
                 Spacer(modifier = Modifier.height(if (isCompactHeight) 6.dp else 10.dp))
             }
@@ -316,7 +438,8 @@ private fun DialerTopBar(
 
         ThemeModeSelector(
             currentMode = themeMode,
-            onModeSelected = onThemeSelect
+            onModeSelected = onThemeSelect,
+            compact = true
         )
     }
 }
@@ -479,7 +602,7 @@ private fun NumberDisplayField(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                text = if (dialerInput.isEmpty()) "Enter Number" else dialerInput,
+                text = if (dialerInput.isEmpty()) "Enter number" else dialerInput,
                 fontSize = if (dialerInput.length > 15) 20.sp else if (dialerInput.length > 10) 24.sp else 28.sp,
                 fontWeight = FontWeight.Bold,
                 color = if (dialerInput.isEmpty()) {
@@ -513,7 +636,7 @@ private fun CallActionsRow(
     dialerInput: String,
     activeAccount: SipAccount?,
     isCompactHeight: Boolean,
-    onSimulateCall: () -> Unit,
+    onPaste: () -> Unit,
     onCall: () -> Unit,
     onBackspace: () -> Unit,
     onClearAll: () -> Unit
@@ -525,20 +648,20 @@ private fun CallActionsRow(
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Quick Test Simulation Button
+        // Paste a copied number (from WhatsApp, a CRM, an SMS...)
         Surface(
-            onClick = onSimulateCall,
+            onClick = onPaste,
             shape = CircleShape,
             color = Color.Transparent,
             modifier = Modifier
                 .size(if (isCompactHeight) 48.dp else 52.dp)
                 .glass(CircleShape, LocalGlassColors.current)
-                .testTag("simulate_call_btn")
+                .testTag("dialer_paste_button")
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(
-                    imageVector = Icons.Default.PlayArrow,
-                    contentDescription = "Test Incoming Call",
+                    imageVector = Icons.Default.ContentPaste,
+                    contentDescription = "Paste number",
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(22.dp)
                 )
@@ -583,10 +706,131 @@ private fun CallActionsRow(
             Box(contentAlignment = Alignment.Center) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.Backspace,
-                    contentDescription = "Backspace",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    contentDescription = "Backspace (hold to clear)",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (dialerInput.isEmpty()) 0.3f else 1f),
                     modifier = Modifier.size(22.dp)
                 )
+            }
+        }
+    }
+}
+
+/**
+ * Recent calls (nothing typed) or matches (while typing), scrollable like the phone's own call
+ * list. Tapping a row puts the number on the dial pad; the green button calls it straight away.
+ */
+@Composable
+private fun RecentCallsList(
+    suggestions: List<DialSuggestion>,
+    typing: Boolean,
+    listState: LazyListState,
+    onPick: (DialSuggestion) -> Unit,
+    onCall: (DialSuggestion) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    if (suggestions.isEmpty()) {
+        Box(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Text(
+                text = if (typing) "No matching numbers" else "No recent calls",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        return
+    }
+    LazyColumn(
+        state = listState,
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        item {
+            Text(
+                text = if (typing) "Matches" else "Recent",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 8.dp, top = 2.dp)
+            )
+        }
+        itemsIndexed(suggestions, key = { index, item -> "$index-${item.number}" }) { _, item ->
+            DialSuggestionRow(item, onPick = { onPick(item) }, onCall = { onCall(item) })
+        }
+        // Room so the last row is not hidden behind the dial pad button
+        item { Spacer(modifier = Modifier.height(72.dp)) }
+    }
+}
+
+@Composable
+private fun DialSuggestionRow(
+    item: DialSuggestion,
+    onPick: () -> Unit,
+    onCall: () -> Unit
+) {
+    val (icon, tint) = when (item.callType) {
+        CallType.MISSED -> Icons.AutoMirrored.Filled.CallMissed to CallActionRed
+        CallType.INCOMING -> Icons.AutoMirrored.Filled.CallReceived to MaterialTheme.colorScheme.primary
+        CallType.OUTGOING -> Icons.AutoMirrored.Filled.CallMade to CallActionGreen
+        null -> Icons.Default.Person to MaterialTheme.colorScheme.primary
+    }
+    val name = item.name.takeIf { it.isNotBlank() && !it.startsWith("sip:") && it != item.number }
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .glass(RoundedCornerShape(16.dp), LocalGlassColors.current)
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(onClick = onPick)
+            .testTag("dial_suggestion_${item.number}"),
+        shape = RoundedCornerShape(16.dp),
+        color = Color.Transparent
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 14.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = (name ?: item.number) + if (item.count > 1) "  (${item.count})" else "",
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (item.callType == CallType.MISSED) CallActionRed else MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                val details = listOfNotNull(
+                    if (name != null) item.number else null,
+                    when (item.callType) {
+                        CallType.MISSED -> "Missed"
+                        CallType.INCOMING -> "Incoming"
+                        CallType.OUTGOING -> "Outgoing"
+                        null -> "Contact"
+                    },
+                    item.timestamp?.let { relativeTime(it) }
+                ).joinToString(" · ")
+                run {
+                    Text(
+                        text = details,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1
+                    )
+                }
+            }
+            Surface(
+                onClick = onCall,
+                shape = CircleShape,
+                color = CallActionGreen.copy(alpha = 0.15f),
+                modifier = Modifier.size(40.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Default.Call,
+                        contentDescription = "Call ${item.number}",
+                        tint = CallActionGreen,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
         }
     }

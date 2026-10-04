@@ -331,6 +331,14 @@ fun VoipSettingsSection(
                     onCheckedChange = { onSettingsChanged(settings.copy(showOnLockScreen = it)) }
                 )
 
+                SettingToggleItem(
+                    title = "Android Call Integration",
+                    description = "Shows calls in Android's phone system. Turn off if a phone has no voice on incoming calls",
+                    checked = settings.androidCallIntegration,
+                    testTag = "setting_android_call_integration",
+                    onCheckedChange = { onSettingsChanged(settings.copy(androidCallIntegration = it)) }
+                )
+
                 BackgroundReliabilityCard()
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f))

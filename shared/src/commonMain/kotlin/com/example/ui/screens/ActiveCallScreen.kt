@@ -352,7 +352,13 @@ fun ActiveCallScreen(
                         modifier = Modifier
                             .size(8.dp)
                             .clip(CircleShape)
-                            .background(if (isOnHold) Color(0xFFFFA000) else CallActionGreen)
+                            .background(
+                                when {
+                                    callState is CallState.Disconnected -> CallActionRed
+                                    isOnHold -> Color(0xFFFFA000)
+                                    else -> CallActionGreen
+                                }
+                            )
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(

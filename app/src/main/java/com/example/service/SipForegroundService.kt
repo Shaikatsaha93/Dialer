@@ -155,12 +155,7 @@ class SipForegroundService : Service() {
                     is CallState.Idle -> {
                         if (keepAlive) {
                             val regStatus = SoftphoneApp.instance.sipManager.registrationState.value
-                            val sub = if (regStatus == RegistrationStatus.REGISTERED) {
-                                "SIP Online • Background & Lock Screen Active"
-                            } else {
-                                "SIP Standby • Ready for incoming calls"
-                            }
-                            updateNotification("SIP Softphone Standby", sub, isOngoingCall = false)
+                            updateNotification(STANDBY_TITLE, standbyText(regStatus), isOngoingCall = false)
                         } else {
                             releaseLocks()
                             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -208,16 +203,17 @@ class SipForegroundService : Service() {
                 val callState = SoftphoneApp.instance.sipManager.callState.value
                 val keepAlive = SoftphoneApp.instance.settingsRepository.settings.value.backgroundKeepAlive
                 if (callState is CallState.Idle && keepAlive) {
-                    val message = when (regState) {
-                        RegistrationStatus.REGISTERED -> "SIP Online • Active in Background & Lock Screen"
-                        RegistrationStatus.REGISTERING -> "Registering with SIP Server..."
-                        RegistrationStatus.FAILED -> "Registration Failed • Retrying in background"
-                        RegistrationStatus.UNREGISTERED -> "SIP Standby • Unregistered"
-                    }
-                    updateNotification("SIP Softphone Standby", message, isOngoingCall = false)
+                    updateNotification(STANDBY_TITLE, standbyText(regState), isOngoingCall = false)
                 }
             }
         }
+    }
+
+    private fun standbyText(status: RegistrationStatus) = when (status) {
+        RegistrationStatus.REGISTERED -> "Ready for calls"
+        RegistrationStatus.REGISTERING -> "Connecting..."
+        RegistrationStatus.FAILED -> "Reconnecting..."
+        RegistrationStatus.UNREGISTERED -> "Offline"
     }
 
     private fun startForegroundWithNotification(title: String, text: String) {
@@ -318,9 +314,11 @@ class SipForegroundService : Service() {
             .setSmallIcon(android.R.drawable.sym_call_outgoing)
             .setContentIntent(openAppPendingIntent)
             .setOngoing(true)
-            .setPriority(if (isCall) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_LOW)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setSilent(!isCall)
+            .setShowWhen(isCall)
+            .setPriority(if (isCall) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_MIN)
+            .setVisibility(if (isCall) NotificationCompat.VISIBILITY_PUBLIC else NotificationCompat.VISIBILITY_SECRET)
+            .setCategory(if (isCall) NotificationCompat.CATEGORY_CALL else NotificationCompat.CATEGORY_SERVICE)
 
         if (isIncoming) {
             val answerIntent = Intent(this, SipForegroundService::class.java).apply { action = ACTION_ANSWER }
@@ -370,18 +368,25 @@ class SipForegroundService : Service() {
                 setSound(null, null)
                 lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             }
+            // Android requires a notification while the app waits for calls in the background.
+            // "Min" importance keeps it out of the way: no status-bar icon, not on the lock
+            // screen, folded into one line at the bottom of the notification shade.
             val standbyChannel = NotificationChannel(
                 CHANNEL_STANDBY_ID,
-                "SIP Standby (background)",
-                NotificationManager.IMPORTANCE_LOW
+                "Background standby",
+                NotificationManager.IMPORTANCE_MIN
             ).apply {
-                description = "Silent notification while the app waits for incoming calls"
+                description = "Keeps the app ready for incoming calls"
                 setSound(null, null)
                 setShowBadge(false)
+                enableVibration(false)
+                lockscreenVisibility = Notification.VISIBILITY_SECRET
             }
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.createNotificationChannel(channel)
             manager.createNotificationChannel(standbyChannel)
+            // A channel's importance cannot be lowered once created: drop the old (Low) one
+            manager.deleteNotificationChannel(OLD_CHANNEL_STANDBY_ID)
         }
     }
 
@@ -401,7 +406,9 @@ class SipForegroundService : Service() {
     companion object {
         private const val TAG = "SipForegroundService"
         const val CHANNEL_ID = "softphone_active_call_channel"
-        const val CHANNEL_STANDBY_ID = "softphone_standby_channel"
+        const val CHANNEL_STANDBY_ID = "softphone_standby_min"
+        private const val OLD_CHANNEL_STANDBY_ID = "softphone_standby_channel"
+        private const val STANDBY_TITLE = "Dialer"
         const val NOTIFICATION_ID = 2001
 
         const val ACTION_START_SERVICE = "com.example.softphone.START_CALL_SERVICE"

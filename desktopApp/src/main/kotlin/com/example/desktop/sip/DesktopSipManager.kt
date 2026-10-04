@@ -9,6 +9,7 @@ import com.example.data.model.SecondaryCallInfo
 import com.example.data.model.SipAccount
 import com.example.data.model.SipTransport
 import com.example.data.repository.CallRecordings
+import com.example.data.repository.SettingsRepository
 import com.example.desktop.sip.LinphoneNative.Companion.CALL_CONNECTED
 import com.example.desktop.sip.LinphoneNative.Companion.CALL_END
 import com.example.desktop.sip.LinphoneNative.Companion.CALL_ERROR
@@ -197,6 +198,8 @@ class DesktopSipManager : SipManager {
             n.linphone_config_set_int(config, "sip", "inc_timeout", 60)
             n.linphone_config_set_int(config, "sip", "in_call_timeout", 0)
             n.linphone_config_set_int(config, "sip", "keepalive_period", 20000)
+            // Survive a short network drop: wait 60 s without voice packets before ending the call
+            n.linphone_config_set_int(config, "rtp", "nortp_timeout", 60)
             // Low latency: 40 ms starting jitter buffer (adaptive), voice packets marked DSCP EF
             n.linphone_config_set_int(config, "rtp", "audio_jitt_comp", 40)
             n.linphone_config_set_int(config, "rtp", "audio_adaptive_jitt_comp_enabled", 1)
@@ -288,16 +291,36 @@ class DesktopSipManager : SipManager {
         n.linphone_core_enable_adaptive_rate_control(c, bool(settings.adaptiveRateControl))
         n.linphone_core_enable_ipv6(c, bool(settings.ipv6Enabled))
         n.linphone_core_set_mic_gain_db(c, if (settings.micGainBoost) 6f else 0f)
-        n.linphone_core_set_stun_server(c, if (settings.stunEnabled && settings.stunServer.isNotBlank()) settings.stunServer else null)
+        // STUN puts the public IP in the SDP (see LinphoneSipManager.applyNatPolicy on Android)
+        val stunServer = settings.stunServer.trim().ifBlank { SettingsRepository.DEFAULT_STUN }
+        val policy = n.linphone_core_get_nat_policy(c) ?: n.linphone_core_create_nat_policy(c)
+        n.linphone_nat_policy_set_stun_server(policy, stunServer)
+        n.linphone_nat_policy_enable_stun(policy, bool(settings.stunEnabled))
+        n.linphone_nat_policy_enable_ice(policy, FALSE)
+        n.linphone_core_set_nat_policy(c, policy)
+        n.linphone_core_set_stun_server(c, if (settings.stunEnabled) stunServer else null)
+        log(if (settings.stunEnabled) "[Network] STUN on ($stunServer): calls use the public IP" else "[Network] STUN off")
     }
 
     // ---- Registration ----
 
     override fun registerAccount(account: SipAccount) {
+        val previous = activeAccountModel
         activeAccountModel = account
         sip.launch {
             startCore()
             val c = core ?: return@launch
+            // Same login already registered: keep it (re-creating it unregisters first, and a
+            // call arriving in that gap is lost)
+            if (previous != null && previous.username.trim() == account.username.trim() &&
+                previous.password == account.password && previous.domain.trim() == account.domain.trim() &&
+                previous.port == account.port && previous.transport == account.transport &&
+                previous.displayName == account.displayName && native.linphone_core_get_default_account(c) != null &&
+                _registrationState.value in setOf(RegistrationStatus.REGISTERED, RegistrationStatus.REGISTERING)
+            ) {
+                native.linphone_core_ensure_registered(c)
+                return@launch
+            }
             val n = native
             val f = factory!!
             val host = cleanHost(account.domain)

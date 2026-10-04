@@ -15,6 +15,10 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.lifecycle.lifecycleScope
+import com.example.update.UpdateDialog
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -99,6 +103,16 @@ class MainActivity : ComponentActivity() {
             }
 
             SoftphoneTheme(darkTheme = isDarkTheme) {
+                // A newer version from GitHub releases (see AppUpdater)
+                val updater = SoftphoneApp.instance.appUpdater
+                val updateState by updater.state.collectAsStateWithLifecycle()
+                val updateScope = rememberCoroutineScope()
+                UpdateDialog(
+                    state = updateState,
+                    onUpdate = { update -> updateScope.launch { updater.downloadAndInstall(update) } },
+                    onLater = updater::dismiss
+                )
+
                 if (license is LicenseState.Approved) {
                     SoftphoneMainScreen(
                         viewModel = viewModel,
@@ -147,6 +161,11 @@ class MainActivity : ComponentActivity() {
         val licenseManager = SoftphoneApp.instance.licenseManager
         val state = licenseManager.state.value
         if (state is LicenseState.Denied || state is LicenseState.Error) licenseManager.refresh()
+        // Opening the app checks the SIP registration right away (e.g. after the network changed
+        // while the phone was asleep) instead of waiting for the next refresh
+        if (state is LicenseState.Approved) SoftphoneApp.instance.sipManager.onPushWakeup()
+        // New version published on GitHub? (at most once an hour)
+        lifecycleScope.launch { SoftphoneApp.instance.appUpdater.check() }
     }
 
     private fun configureLockScreenFlags() {
