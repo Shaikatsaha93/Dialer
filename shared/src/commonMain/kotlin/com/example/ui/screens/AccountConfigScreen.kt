@@ -51,6 +51,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -293,6 +294,8 @@ fun AccountConfigScreen(
                     )
 
                     AdminAccessCard()
+
+                    AppVersionFooter()
                 }
             }
         } else {
@@ -430,6 +433,8 @@ fun AccountConfigScreen(
                 )
 
                 AdminAccessCard()
+
+                AppVersionFooter()
 
                 Spacer(modifier = Modifier.height(16.dp))
             }
@@ -1045,6 +1050,30 @@ private fun AccountsListSection(
                     onEdit = { onEdit(account) }
                 )
             }
+        }
+    }
+}
+
+/** "Dialer · Version 1.0.3" and a button to look for a newer release. */
+@Composable
+private fun AppVersionFooter() {
+    val version = com.example.AppGraph.appVersion
+    val checkForUpdates = com.example.AppGraph.checkForUpdates
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = if (version.isNotBlank()) "Dialer · Version $version" else "Dialer",
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.testTag("app_version")
+        )
+        if (checkForUpdates != null) {
+            TextButton(onClick = checkForUpdates) { Text("Check for updates") }
         }
     }
 }

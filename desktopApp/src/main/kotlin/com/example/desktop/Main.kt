@@ -59,6 +59,9 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
+/** Same as packageVersion in desktopApp/build.gradle.kts */
+private const val DESKTOP_VERSION = "1.0.0"
+
 /** Events the window reacts to (tray notifications, bringing the window up for a call). */
 private object DesktopEvents {
     var notification by mutableStateOf<Notification?>(null)
@@ -93,6 +96,7 @@ fun main() {
     AppGraph.license = license
     AppGraph.admin = admin
     AppGraph.chatRepository = chat
+    AppGraph.appVersion = DESKTOP_VERSION
 
     sipManager.applySettings(settingsRepository.settings.value)
     sipManager.initializeSdk()

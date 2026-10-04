@@ -24,4 +24,9 @@ object AppGraph {
     lateinit var license: LicenseService
     lateinit var admin: AdminService
     lateinit var chatRepository: ChatRepository
+
+    /** Shown in Settings and the dialer header, e.g. "1.0.3" */
+    var appVersion: String = ""
+    /** Looks for a newer release right away; null where the platform has no in-app updates */
+    var checkForUpdates: (() -> Unit)? = null
 }

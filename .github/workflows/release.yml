@@ -69,14 +69,15 @@ jobs:
           cp app/build/outputs/apk/release/app-release.apk Dialer.apk
 
       - name: update.json
-        env:
-          NOTES: ${{ github.event.head_commit.message }}
         run: |
+          # First lines of the latest commit message (also for runs started by hand)
+          NOTES="$(git log -1 --format=%B | head -n 5)"
+          echo "NOTES<<EOF" >> "$GITHUB_ENV"; echo "$NOTES" >> "$GITHUB_ENV"; echo "EOF" >> "$GITHUB_ENV"
           jq -n \
             --argjson code "$VERSION_CODE" \
             --arg name "$VERSION_NAME" \
             --arg url "https://github.com/${{ github.repository }}/releases/download/v$VERSION_NAME/Dialer.apk" \
-            --arg notes "$(printf '%s' "$NOTES" | head -n 5)" \
+            --arg notes "$NOTES" \
             '{versionCode: $code, versionName: $name, apkUrl: $url, notes: $notes}' > update.json
           cat update.json
 
@@ -85,7 +86,7 @@ jobs:
         with:
           tag_name: v${{ env.VERSION_NAME }}
           name: Dialer ${{ env.VERSION_NAME }}
-          body: ${{ github.event.head_commit.message }}
+          body: ${{ env.NOTES }}
           make_latest: true
           files: |
             Dialer.apk

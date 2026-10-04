@@ -427,7 +427,8 @@ private fun DialerTopBar(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "Developed By Shaikat",
+                    text = "Developed By Shaikat" +
+                        com.example.AppGraph.appVersion.takeIf { it.isNotBlank() }?.let { " · v$it" }.orEmpty(),
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.primary,

@@ -47,11 +47,14 @@ class AppUpdater(private val context: Context) {
 
     private var lastCheck = 0L
 
-    /** Looks for a newer release, at most once an hour (called each time the app is opened). */
-    suspend fun check(force: Boolean = false) {
+    /**
+     * Looks for a newer release, at most once an hour (called each time the app is opened);
+     * [force] checks right away. Returns false when the check could not reach GitHub.
+     */
+    suspend fun check(force: Boolean = false): Boolean {
         val now = System.currentTimeMillis()
-        if (!force && now - lastCheck < CHECK_INTERVAL_MS) return
-        if (_state.value is UpdateState.Downloading) return
+        if (!force && now - lastCheck < CHECK_INTERVAL_MS) return true
+        if (_state.value is UpdateState.Downloading) return true
         lastCheck = now
         try {
             val json = withContext(Dispatchers.IO) { download(UPDATE_JSON_URL) }
@@ -64,9 +67,11 @@ class AppUpdater(private val context: Context) {
             )
             Log.i(TAG, "Latest release ${update.versionName} (${update.versionCode}), installed ${BuildConfig.VERSION_CODE}")
             if (update.versionCode > BuildConfig.VERSION_CODE) _state.value = UpdateState.Available(update)
+            return true
         } catch (e: Exception) {
             // No release yet, offline, GitHub unreachable: try again next time
             Log.w(TAG, "Update check failed: ${e.message}")
+            return false
         }
     }
 
