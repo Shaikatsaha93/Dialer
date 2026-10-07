@@ -1,0 +1,8 @@
+{
+  "name": "Dialer",
+  "description": "Dialer - Premium native SIP/VoIP softphone with DTMF keypad, multi-account management, telecom integration, and call history. Developed By Shaikat.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
