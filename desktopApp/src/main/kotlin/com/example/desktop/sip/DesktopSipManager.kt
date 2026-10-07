@@ -32,6 +32,7 @@ import com.example.sip.CallEvent
 import com.example.sip.ChatHeaders
 import com.example.sip.IncomingChatMessage
 import com.example.sip.SipManager
+import com.example.sip.toDialableNumber
 import com.sun.jna.Pointer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -446,6 +447,11 @@ class DesktopSipManager : SipManager {
         }
         val n = native
         val target = destination.trim().replace(Regex("[\\s\\-()]"), "").removePrefix("sip:").removePrefix("sips:")
+            .let { dest ->
+                // +8801XXXXXXXXX -> 01XXXXXXXXX (see toDialableNumber); "@domain" stays as typed
+                val user = dest.substringBefore("@")
+                toDialableNumber(user) + dest.substring(user.length)
+            }
         val domain = activeAccountModel?.domain?.let { cleanHost(it) }
         val uri = when {
             target.contains("@") -> "sip:$target"

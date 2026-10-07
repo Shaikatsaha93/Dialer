@@ -1089,7 +1089,11 @@ class LinphoneSipManager(
 
         val rawDest = destinationUri.trim()
         val cleanDest = rawDest.replace(Regex("[\\s\\-\\(\\)]"), "")
-        val numberOrUser = cleanDest.removePrefix("sip:").removePrefix("sips:").trim()
+        val numberOrUser = cleanDest.removePrefix("sip:").removePrefix("sips:").trim().let { dest ->
+            // +8801XXXXXXXXX -> 01XXXXXXXXX (see toDialableNumber); "@domain" stays as typed
+            val user = dest.substringBefore("@")
+            toDialableNumber(user) + dest.substring(user.length)
+        }
 
         val c = core
         val activeAcc = activeAccountModel
@@ -1381,7 +1385,11 @@ class LinphoneSipManager(
         if (rawDest.isBlank()) return
 
         val cleanDest = rawDest.replace(Regex("[\\s\\-\\(\\)]"), "")
-        val numberOrUser = cleanDest.removePrefix("sip:").removePrefix("sips:").trim()
+        val numberOrUser = cleanDest.removePrefix("sip:").removePrefix("sips:").trim().let { dest ->
+            // +8801XXXXXXXXX -> 01XXXXXXXXX (see toDialableNumber); "@domain" stays as typed
+            val user = dest.substringBefore("@")
+            toDialableNumber(user) + dest.substring(user.length)
+        }
 
         val c = core
         val activeAcc = activeAccountModel
