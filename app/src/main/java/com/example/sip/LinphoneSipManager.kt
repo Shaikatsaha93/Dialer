@@ -651,7 +651,12 @@ class LinphoneSipManager(
                     if (line.isNotEmpty()) {
                         // Mirror SDK logs (SDP, RTP, conference) to logcat so adb can capture them
                         Log.println(if (level == LogLevel.Error || level == LogLevel.Fatal) Log.ERROR else Log.DEBUG, "LinphoneSdk", line)
-                        _diagnosticLogs.value = (_diagnosticLogs.value + "[${level.name}] $line").takeLast(50)
+                        // The screen's log keeps what explains a call or registration problem;
+                        // the server's OPTIONS pings and network chatter (every few seconds)
+                        // would push a failed call out of it within a minute
+                        if (!isRoutineSdkLine(line)) {
+                            _diagnosticLogs.value = (_diagnosticLogs.value + "[${level.name}] $line").takeLast(DIAGNOSTIC_LINES)
+                        }
                     }
                 }
             } catch (e: Throwable) {
@@ -1833,6 +1838,21 @@ class LinphoneSipManager(
 
     companion object {
         private const val TAG = "LinphoneSipManager"
+        /** Lines kept in Settings > Connection Diagnostics (enough for a whole call) */
+        private const val DIAGNOSTIC_LINES = 300
+
+        /** SDK log lines that repeat all the time and say nothing about a problem */
+        // Only OPTIONS transactions: an INVITE also lists OPTIONS in its Allow header
+        private val OPTIONS_CSEQ = Regex("CSeq:\\s*\\d+\\s+OPTIONS")
+
+        private fun isRoutineSdkLine(line: String): Boolean =
+            OPTIONS_CSEQ.containsMatchIn(line) ||
+                line.startsWith("bellesip_wake_lock") ||
+                line.contains("recv background task") ||
+                line.contains("bytes parsed") ||
+                line.contains("keep alive sent") ||
+                line.startsWith("[Platform Helper]") ||
+                line.startsWith("[Android Platform Helper] Found DNS")
         private val CHAT_HEADERS = listOf(ChatHeaders.GROUP_ID, ChatHeaders.GROUP_NAME, ChatHeaders.GROUP_MEMBERS)
         private val TERMINAL_STATES = setOf(Call.State.End, Call.State.Released, Call.State.Error)
     }
