@@ -673,6 +673,9 @@ class LinphoneSipManager(
                 // UDP keepalive every 20s: mobile-carrier NATs often forget an idle UDP mapping
                 // after ~30s, and then the switch's INVITE never reaches the phone.
                 config.setInt("sip", "keepalive_period", 20000)
+                // Start IPv4-only (Linphone's default is IPv6 on); applyIpFamily turns IPv6 on
+                // only where it can work (see there)
+                config.setInt("sip", "use_ipv6", 0)
                 config.setInt("video", "capture", 0)
                 config.setInt("video", "display", 0)
                 config.setInt("video", "enabled", 0)
@@ -791,13 +794,35 @@ class LinphoneSipManager(
             // Mark voice packets as real-time traffic (DSCP EF), so Wi-Fi routers send them first
             c.audioDscp = 0x2e
             c.isAdaptiveRateControlEnabled = settings.adaptiveRateControl
-            c.isIpv6Enabled = settings.ipv6Enabled
+            applyIpFamily(c)
             c.micGainDb = if (settings.micGainBoost) 6.0f else 0.0f
             applyNatPolicy(c, settings)
             _diagnosticLogs.value = (_diagnosticLogs.value + "[Audio] Echo canceller: " + (if (builtinAec) "phone's built-in" else if (settings.echoCancellation) "software" else "off") + ", jitter buffer 40 ms adaptive").takeLast(50)
             Log.d(TAG, "Applied audio/network settings: AEC=${settings.echoCancellation}, builtinAEC=$builtinAec, AdaptiveRate=${settings.adaptiveRateControl}, IPv6=${settings.ipv6Enabled}")
         } catch (e: Throwable) {
             Log.w(TAG, "applySettings failed: ${e.message}")
+        }
+    }
+
+    /**
+     * IPv4 or IPv6 for SIP and voice. Bangladeshi mobile networks are now often IPv6-only (the
+     * phone reaches IPv4 sites through the operator's NAT64 / 464XLAT). With IPv6 on, the app
+     * then registered and was reachable, but put its IPv6 address in calls, which an IPv4-only
+     * switch cannot answer or send voice to: calls failed on mobile data and worked on Wi-Fi.
+     * A switch given as an IPv4 address therefore always gets IPv4 (Android's 464XLAT carries it
+     * on IPv6-only networks); the IPv6 setting only applies to a switch with a host name.
+     */
+    private fun applyIpFamily(c: Core) {
+        val host = activeAccountModel?.domain?.trim().orEmpty()
+            .removePrefix("sip:").removePrefix("sips:").substringBefore(";").substringBefore("/")
+            .let { if (it.startsWith("[")) it else it.substringBefore(":") }
+        val ipv4Switch = IPV4_ADDRESS.matches(host)
+        val ipv6 = currentSettings.ipv6Enabled && !ipv4Switch
+        if (c.isIpv6Enabled != ipv6) {
+            c.isIpv6Enabled = ipv6
+            val why = if (ipv4Switch && currentSettings.ipv6Enabled) " (switch $host is IPv4)" else ""
+            Log.i(TAG, "IPv6 ${if (ipv6) "on" else "off"}$why")
+            _diagnosticLogs.value = (_diagnosticLogs.value + "[Network] IPv6 ${if (ipv6) "on" else "off"}$why").takeLast(DIAGNOSTIC_LINES)
         }
     }
 
@@ -838,6 +863,8 @@ class LinphoneSipManager(
             return
         }
         activeAccountModel = account
+        // Before the account is created, so REGISTER and calls use the right address family
+        core?.let { applyIpFamily(it) }
         if (c == null) {
             // Simulated registration fallback for testing when native library is absent
             simulateRegistration(account)
@@ -1838,6 +1865,8 @@ class LinphoneSipManager(
 
     companion object {
         private const val TAG = "LinphoneSipManager"
+        private val IPV4_ADDRESS = Regex("""\d{1,3}(\.\d{1,3}){3}""")
+
         /** Lines kept in Settings > Connection Diagnostics (enough for a whole call) */
         private const val DIAGNOSTIC_LINES = 300
 

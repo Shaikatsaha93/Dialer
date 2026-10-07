@@ -96,7 +96,7 @@ class SoftphoneApp : Application() {
             applicationScope.launch(Dispatchers.Main) {
                 val reached = appUpdater.check(force = true)
                 val message = when {
-                    !reached -> "Could not check for updates. Check the internet connection."
+                    !reached -> "Could not check for updates (${appUpdater.lastError}). Check the internet connection."
                     appUpdater.state.value is com.example.update.UpdateState.None -> "You have the latest version (${BuildConfig.VERSION_NAME})"
                     else -> null // the update dialog opens
                 }
