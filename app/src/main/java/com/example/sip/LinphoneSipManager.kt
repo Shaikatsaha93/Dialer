@@ -163,7 +163,7 @@ class LinphoneSipManager(
                 authInfo.domain ?: account.domain.trim()
             )
             core.addAuthInfo(newAuth)
-            _diagnosticLogs.value = (_diagnosticLogs.value + "[SIP Auth] Provided credentials for realm=${authInfo.realm.orEmpty()}").takeLast(50)
+            _diagnosticLogs.value = (_diagnosticLogs.value + "[SIP Auth] Provided credentials for realm=${authInfo.realm.orEmpty()}").takeLast(DIAGNOSTIC_LINES)
         }
 
         override fun onAccountRegistrationStateChanged(
@@ -199,7 +199,7 @@ class LinphoneSipManager(
             } else {
                 "[SIP Reg] State: $state ($message)"
             }
-            _diagnosticLogs.value = (_diagnosticLogs.value + stateLog).takeLast(50)
+            _diagnosticLogs.value = (_diagnosticLogs.value + stateLog).takeLast(DIAGNOSTIC_LINES)
 
             when (state) {
                 RegistrationState.Ok -> {
@@ -251,6 +251,17 @@ class LinphoneSipManager(
             message: String
         ) {
             Log.d(TAG, "Linphone call state changed: $state, message: $message, addr=${call.remoteAddress?.asStringUriOnly()}")
+            // One plain line saying why a call failed (e.g. "404 Not Found"), easy to spot in
+            // the diagnostics copy among the SIP messages
+            if (state == Call.State.Error || state == Call.State.End) {
+                val info = call.errorInfo
+                val code = info?.protocolCode ?: 0
+                if (state == Call.State.Error || code >= 300) {
+                    _diagnosticLogs.value = (_diagnosticLogs.value +
+                        "[Call Failed] ${call.remoteAddress?.asStringUriOnly()}: $code ${info?.phrase.orEmpty()} (${info?.reason}) $message"
+                    ).takeLast(DIAGNOSTIC_LINES)
+                }
+            }
             updateRecording(core, call, state)
             val remoteAddress = call.remoteAddress?.asStringUriOnly() ?: "Unknown"
             val remoteDisplayName = call.remoteAddress?.displayName?.ifBlank { null } ?: remoteAddress
@@ -272,7 +283,7 @@ class LinphoneSipManager(
                 secondaryLinphoneCall = call
                 when (state) {
                     Call.State.OutgoingInit, Call.State.OutgoingProgress -> {
-                        _diagnosticLogs.value = (_diagnosticLogs.value + "[Line 2] Calling: $remoteDisplayName").takeLast(50)
+                        _diagnosticLogs.value = (_diagnosticLogs.value + "[Line 2] Calling: $remoteDisplayName").takeLast(DIAGNOSTIC_LINES)
                         _callState.value = current.copy(
                             isOnHold = true,
                             secondaryCall = current.secondaryCall?.copy(
@@ -283,7 +294,7 @@ class LinphoneSipManager(
                         )
                     }
                     Call.State.OutgoingRinging, Call.State.OutgoingEarlyMedia -> {
-                        _diagnosticLogs.value = (_diagnosticLogs.value + "[Line 2] Ringing: $remoteDisplayName").takeLast(50)
+                        _diagnosticLogs.value = (_diagnosticLogs.value + "[Line 2] Ringing: $remoteDisplayName").takeLast(DIAGNOSTIC_LINES)
                         _callState.value = current.copy(
                             isOnHold = true,
                             secondaryCall = current.secondaryCall?.copy(
@@ -294,7 +305,7 @@ class LinphoneSipManager(
                         )
                     }
                     Call.State.Connected, Call.State.StreamsRunning -> {
-                        _diagnosticLogs.value = (_diagnosticLogs.value + "[Line 2] Connected! 2 calls active. Merge option ready.").takeLast(50)
+                        _diagnosticLogs.value = (_diagnosticLogs.value + "[Line 2] Connected! 2 calls active. Merge option ready.").takeLast(DIAGNOSTIC_LINES)
                         _callState.value = current.copy(
                             isOnHold = true,
                             secondaryCall = current.secondaryCall?.copy(
@@ -321,7 +332,7 @@ class LinphoneSipManager(
                         )
                     }
                     Call.State.End, Call.State.Released, Call.State.Error -> {
-                        _diagnosticLogs.value = (_diagnosticLogs.value + "[Line 2] Call ended ($message). Resuming Line 1.").takeLast(50)
+                        _diagnosticLogs.value = (_diagnosticLogs.value + "[Line 2] Call ended ($message). Resuming Line 1.").takeLast(DIAGNOSTIC_LINES)
                         secondaryLinphoneCall = null
                         primaryLinphoneCall?.resume()
                         currentLinphoneCall = primaryLinphoneCall
@@ -353,7 +364,7 @@ class LinphoneSipManager(
                     scope.launch {
                         if (currentSettings.autoAnswer) {
                             val delayMs = (currentSettings.autoAnswerDelaySeconds.coerceAtLeast(1)) * 1000L
-                            _diagnosticLogs.value = (_diagnosticLogs.value + "[SIP Auto-Answer] Answering in ${currentSettings.autoAnswerDelaySeconds}s").takeLast(50)
+                            _diagnosticLogs.value = (_diagnosticLogs.value + "[SIP Auto-Answer] Answering in ${currentSettings.autoAnswerDelaySeconds}s").takeLast(DIAGNOSTIC_LINES)
                             delay(delayMs)
                             if (_callState.value is CallState.Incoming) {
                                 acceptCall()
@@ -403,7 +414,7 @@ class LinphoneSipManager(
                     // If Line 1 ended but Line 2 is still active, promote Line 2 to primary!
                     val sec = (_callState.value as? CallState.Connected)?.secondaryCall
                     if (sec != null && secondaryLinphoneCall != null) {
-                        _diagnosticLogs.value = (_diagnosticLogs.value + "[Call] Line 1 ended. Switching to Line 2.").takeLast(50)
+                        _diagnosticLogs.value = (_diagnosticLogs.value + "[Call] Line 1 ended. Switching to Line 2.").takeLast(DIAGNOSTIC_LINES)
                         primaryLinphoneCall = secondaryLinphoneCall
                         secondaryLinphoneCall = null
                         currentLinphoneCall = primaryLinphoneCall
@@ -484,7 +495,7 @@ class LinphoneSipManager(
             if (state == Call.State.StreamsRunning && call.conference == null && conf != null) {
                 try {
                     conf.addParticipant(call)
-                    _diagnosticLogs.value = (_diagnosticLogs.value + "[Conference] $remoteDisplayName answered, added to the mixer").takeLast(50)
+                    _diagnosticLogs.value = (_diagnosticLogs.value + "[Conference] $remoteDisplayName answered, added to the mixer").takeLast(DIAGNOSTIC_LINES)
                 } catch (e: Throwable) {
                     Log.w(TAG, "Late add to conference: ${e.message}")
                 }
@@ -495,13 +506,13 @@ class LinphoneSipManager(
         when {
             others.isEmpty() -> return false
             others.size == 1 -> {
-                _diagnosticLogs.value = (_diagnosticLogs.value + "[Conference] $remoteDisplayName left. Back to 1-on-1 call.").takeLast(50)
+                _diagnosticLogs.value = (_diagnosticLogs.value + "[Conference] $remoteDisplayName left. Back to 1-on-1 call.").takeLast(DIAGNOSTIC_LINES)
                 promoteRemainingCall(others.first())
             }
             else -> {
                 val remaining = current.participants.filterNot { userPart(it.uri) == userPart(remoteAddress) }
                 if (remaining.size != current.participants.size) {
-                    _diagnosticLogs.value = (_diagnosticLogs.value + "[Conference] $remoteDisplayName left the conference").takeLast(50)
+                    _diagnosticLogs.value = (_diagnosticLogs.value + "[Conference] $remoteDisplayName left the conference").takeLast(DIAGNOSTIC_LINES)
                     _callState.value = current.copy(participants = remaining)
                 }
             }
@@ -543,7 +554,7 @@ class LinphoneSipManager(
                 val conf = c.conference
                 val header = "[Conf Stats] conf=${conf?.state} in=${conf?.isIn} members=${conf?.participantCount}"
                 Log.i(TAG, header)
-                _diagnosticLogs.value = (_diagnosticLogs.value + header).takeLast(50)
+                _diagnosticLogs.value = (_diagnosticLogs.value + header).takeLast(DIAGNOSTIC_LINES)
                 for (call in liveCalls(c)) {
                     val pt = call.currentParams?.usedAudioPayloadType
                     val st = call.audioStats
@@ -553,7 +564,7 @@ class LinphoneSipManager(
                         "in=${"%.1f".format(st?.downloadBandwidth ?: 0f)}kbps out=${"%.1f".format(st?.uploadBandwidth ?: 0f)}kbps " +
                         "loss=${"%.1f".format(st?.receiverLossRate ?: 0f)}%"
                     Log.i(TAG, line)
-                    _diagnosticLogs.value = (_diagnosticLogs.value + line).takeLast(50)
+                    _diagnosticLogs.value = (_diagnosticLogs.value + line).takeLast(DIAGNOSTIC_LINES)
                 }
             }
         }
@@ -630,7 +641,7 @@ class LinphoneSipManager(
             if (input != null) c.inputAudioDevice = input
         }
         Log.i(TAG, "Audio route: out=${device.type}/${device.deviceName} in=${input?.type}/${input?.deviceName}")
-        _diagnosticLogs.value = (_diagnosticLogs.value + "[Audio] Route: ${device.type} / mic ${input?.type ?: "default"}").takeLast(50)
+        _diagnosticLogs.value = (_diagnosticLogs.value + "[Audio] Route: ${device.type} / mic ${input?.type ?: "default"}").takeLast(DIAGNOSTIC_LINES)
     }
 
     override fun initializeSdk() {
@@ -771,11 +782,11 @@ class LinphoneSipManager(
             core = newCore
             applySettings(currentSettings)
             Log.i(TAG, "Linphone Core initialized and started successfully.")
-            _diagnosticLogs.value = (_diagnosticLogs.value + "[Linphone] Core started successfully").takeLast(50)
+            _diagnosticLogs.value = (_diagnosticLogs.value + "[Linphone] Core started successfully").takeLast(DIAGNOSTIC_LINES)
         } catch (e: Throwable) {
             Log.e(TAG, "Failed to initialize Linphone Core: ${e.message}", e)
             _registrationMessage.value = "Linphone core init: ${e.message}"
-            _diagnosticLogs.value = (_diagnosticLogs.value + "[Error] Core init: ${e.message}").takeLast(50)
+            _diagnosticLogs.value = (_diagnosticLogs.value + "[Error] Core init: ${e.message}").takeLast(DIAGNOSTIC_LINES)
         }
     }
 
@@ -797,7 +808,7 @@ class LinphoneSipManager(
             applyIpFamily(c)
             c.micGainDb = if (settings.micGainBoost) 6.0f else 0.0f
             applyNatPolicy(c, settings)
-            _diagnosticLogs.value = (_diagnosticLogs.value + "[Audio] Echo canceller: " + (if (builtinAec) "phone's built-in" else if (settings.echoCancellation) "software" else "off") + ", jitter buffer 40 ms adaptive").takeLast(50)
+            _diagnosticLogs.value = (_diagnosticLogs.value + "[Audio] Echo canceller: " + (if (builtinAec) "phone's built-in" else if (settings.echoCancellation) "software" else "off") + ", jitter buffer 40 ms adaptive").takeLast(DIAGNOSTIC_LINES)
             Log.d(TAG, "Applied audio/network settings: AEC=${settings.echoCancellation}, builtinAEC=$builtinAec, AdaptiveRate=${settings.adaptiveRateControl}, IPv6=${settings.ipv6Enabled}")
         } catch (e: Throwable) {
             Log.w(TAG, "applySettings failed: ${e.message}")
@@ -845,7 +856,7 @@ class LinphoneSipManager(
         c.stunServer = if (settings.stunEnabled) server else null
         val line = if (settings.stunEnabled) "[Network] STUN on ($server): calls use the public IP" else "[Network] STUN off: calls use the local IP"
         Log.i(TAG, line)
-        _diagnosticLogs.value = (_diagnosticLogs.value + line).takeLast(50)
+        _diagnosticLogs.value = (_diagnosticLogs.value + line).takeLast(DIAGNOSTIC_LINES)
     }
 
     override fun registerAccount(account: SipAccount) {
@@ -897,7 +908,7 @@ class LinphoneSipManager(
 
             _registrationState.value = RegistrationStatus.REGISTERING
             _registrationMessage.value = "Registering $cleanUsername@$host..."
-            _diagnosticLogs.value = (_diagnosticLogs.value + "[SIP] Registering $cleanUsername@$host:$port (${account.transport.name})").takeLast(50)
+            _diagnosticLogs.value = (_diagnosticLogs.value + "[SIP] Registering $cleanUsername@$host:$port (${account.transport.name})").takeLast(DIAGNOSTIC_LINES)
 
             c.clearAccounts()
             c.clearAllAuthInfo()
@@ -1000,7 +1011,7 @@ class LinphoneSipManager(
             Log.e(TAG, "Error configuring SIP account: ${e.message}", e)
             _registrationState.value = RegistrationStatus.FAILED
             _registrationMessage.value = "Registration error: ${e.message}"
-            _diagnosticLogs.value = (_diagnosticLogs.value + "[Error] Config error: ${e.message}").takeLast(50)
+            _diagnosticLogs.value = (_diagnosticLogs.value + "[Error] Config error: ${e.message}").takeLast(DIAGNOSTIC_LINES)
         }
     }
 
@@ -1097,7 +1108,7 @@ class LinphoneSipManager(
                 // Re-REGISTERs only if the registration is not currently OK
                 c.ensureRegistered()
             }
-            _diagnosticLogs.value = (_diagnosticLogs.value + "[SIP] Checking registration").takeLast(50)
+            _diagnosticLogs.value = (_diagnosticLogs.value + "[SIP] Checking registration").takeLast(DIAGNOSTIC_LINES)
         }
     }
 
@@ -1169,7 +1180,7 @@ class LinphoneSipManager(
 
             if (address == null) {
                 Log.w(TAG, "Could not parse URI: $finalSipUri, fallback to simulated call")
-                _diagnosticLogs.value = (_diagnosticLogs.value + "[SIP Call] Failed to parse URI: $finalSipUri").takeLast(50)
+                _diagnosticLogs.value = (_diagnosticLogs.value + "[SIP Call] Failed to parse URI: $finalSipUri").takeLast(DIAGNOSTIC_LINES)
                 simulateOutgoingCall(finalSipUri, effectiveDisplayName)
                 return
             }
@@ -1191,7 +1202,7 @@ class LinphoneSipManager(
 
             val dialLog = "[SIP Call] Dialing: ${address.asStringUriOnly()} via ${account?.params?.identityAddress?.asStringUriOnly() ?: "default transport"}"
             Log.i(TAG, dialLog)
-            _diagnosticLogs.value = (_diagnosticLogs.value + dialLog).takeLast(50)
+            _diagnosticLogs.value = (_diagnosticLogs.value + dialLog).takeLast(DIAGNOSTIC_LINES)
 
             val call = if (callParams != null) {
                 c.inviteAddressWithParams(address, callParams)
@@ -1201,7 +1212,7 @@ class LinphoneSipManager(
 
             if (call == null) {
                 Log.w(TAG, "inviteAddressWithParams returned null for $finalSipUri, fallback simulated")
-                _diagnosticLogs.value = (_diagnosticLogs.value + "[SIP Call] Linphone invite returned null for $finalSipUri").takeLast(50)
+                _diagnosticLogs.value = (_diagnosticLogs.value + "[SIP Call] Linphone invite returned null for $finalSipUri").takeLast(DIAGNOSTIC_LINES)
                 simulateOutgoingCall(finalSipUri, effectiveDisplayName)
             } else {
                 currentLinphoneCall = call
@@ -1213,7 +1224,7 @@ class LinphoneSipManager(
             }
         } catch (e: Throwable) {
             Log.e(TAG, "Error initiating Linphone call: ${e.message}", e)
-            _diagnosticLogs.value = (_diagnosticLogs.value + "[SIP Call Error] ${e.message}").takeLast(50)
+            _diagnosticLogs.value = (_diagnosticLogs.value + "[SIP Call Error] ${e.message}").takeLast(DIAGNOSTIC_LINES)
             simulateOutgoingCall(finalSipUri, effectiveDisplayName)
         }
     }
@@ -1461,7 +1472,7 @@ class LinphoneSipManager(
                 )
                 val updatedList = current.participants + newParticipant
                 _callState.value = current.copy(participants = updatedList)
-                _diagnosticLogs.value = (_diagnosticLogs.value + "[Conference] Inviting participant: $effectiveDisplayName ($finalSipUri)").takeLast(50)
+                _diagnosticLogs.value = (_diagnosticLogs.value + "[Conference] Inviting participant: $effectiveDisplayName ($finalSipUri)").takeLast(DIAGNOSTIC_LINES)
 
                 // Let the conference place the call itself: it joins the mixer once answered.
                 // (Adding a still-ringing call via addAllToConference broke the mixer.)
@@ -1480,13 +1491,13 @@ class LinphoneSipManager(
                             } else {
                                 coreInstance.inviteAddress(address)
                             }
-                            _diagnosticLogs.value = (_diagnosticLogs.value + "[SIP] Conference INVITE sent to $finalSipUri").takeLast(50)
+                            _diagnosticLogs.value = (_diagnosticLogs.value + "[SIP] Conference INVITE sent to $finalSipUri").takeLast(DIAGNOSTIC_LINES)
                         } else {
-                            _diagnosticLogs.value = (_diagnosticLogs.value + "[SIP Error] Invalid conference URI: $finalSipUri").takeLast(50)
+                            _diagnosticLogs.value = (_diagnosticLogs.value + "[SIP Error] Invalid conference URI: $finalSipUri").takeLast(DIAGNOSTIC_LINES)
                         }
                     } catch (e: Throwable) {
                         Log.w(TAG, "Linphone add participant error: ${e.message}")
-                        _diagnosticLogs.value = (_diagnosticLogs.value + "[SIP Error] Conference invite error: ${e.message}").takeLast(50)
+                        _diagnosticLogs.value = (_diagnosticLogs.value + "[SIP Error] Conference invite error: ${e.message}").takeLast(DIAGNOSTIC_LINES)
                     }
                 }
             } else if (c != null && (primaryLinphoneCall ?: currentLinphoneCall) != null &&
@@ -1513,7 +1524,7 @@ class LinphoneSipManager(
                     isOnHold = true,
                     secondaryCall = secCall
                 )
-                _diagnosticLogs.value = (_diagnosticLogs.value + "[Call] Line 1 placed on hold. Dialing Line 2: $effectiveDisplayName ($finalSipUri)").takeLast(50)
+                _diagnosticLogs.value = (_diagnosticLogs.value + "[Call] Line 1 placed on hold. Dialing Line 2: $effectiveDisplayName ($finalSipUri)").takeLast(DIAGNOSTIC_LINES)
 
                 // Actually transmit SIP INVITE on 2nd Line via Linphone Core
                 c?.let { coreInstance ->
@@ -1528,13 +1539,13 @@ class LinphoneSipManager(
                                 coreInstance.inviteAddress(address)
                             }
                             secondaryLinphoneCall = newCall
-                            _diagnosticLogs.value = (_diagnosticLogs.value + "[SIP] 2nd Line Outgoing INVITE transmitted to $finalSipUri").takeLast(50)
+                            _diagnosticLogs.value = (_diagnosticLogs.value + "[SIP] 2nd Line Outgoing INVITE transmitted to $finalSipUri").takeLast(DIAGNOSTIC_LINES)
                         } else {
-                            _diagnosticLogs.value = (_diagnosticLogs.value + "[SIP Error] Failed to resolve address: $finalSipUri").takeLast(50)
+                            _diagnosticLogs.value = (_diagnosticLogs.value + "[SIP Error] Failed to resolve address: $finalSipUri").takeLast(DIAGNOSTIC_LINES)
                         }
                     } catch (e: Throwable) {
                         Log.e(TAG, "Failed to invite secondary line: ${e.message}", e)
-                        _diagnosticLogs.value = (_diagnosticLogs.value + "[SIP Error] Dialing 2nd line failed: ${e.message}").takeLast(50)
+                        _diagnosticLogs.value = (_diagnosticLogs.value + "[SIP Error] Dialing 2nd line failed: ${e.message}").takeLast(DIAGNOSTIC_LINES)
                     }
                 } ?: run {
                     // Preview or simulated fallback
@@ -1543,7 +1554,7 @@ class LinphoneSipManager(
                         val cur = _callState.value
                         if (cur is CallState.Connected && cur.secondaryCall != null) {
                             _callState.value = cur.copy(secondaryCall = cur.secondaryCall?.copy(isConnected = true))
-                            _diagnosticLogs.value = (_diagnosticLogs.value + "[Line 2] Connected (Simulated). 2 calls active. Merge option ready.").takeLast(50)
+                            _diagnosticLogs.value = (_diagnosticLogs.value + "[Line 2] Connected (Simulated). 2 calls active. Merge option ready.").takeLast(DIAGNOSTIC_LINES)
                         }
                     }
                 }
@@ -1613,12 +1624,12 @@ class LinphoneSipManager(
                     )
                 )
             )
-            _diagnosticLogs.value = (_diagnosticLogs.value + "[Conference] Line 1 kept live in conference, inviting $displayName ($finalSipUri)").takeLast(50)
+            _diagnosticLogs.value = (_diagnosticLogs.value + "[Conference] Line 1 kept live in conference, inviting $displayName ($finalSipUri)").takeLast(DIAGNOSTIC_LINES)
             startConferenceStatsLogger()
             true
         } catch (e: Throwable) {
             Log.e(TAG, "Start conference and invite: ${e.message}", e)
-            _diagnosticLogs.value = (_diagnosticLogs.value + "[Conference Error] ${e.message}. Falling back to hold + merge.").takeLast(50)
+            _diagnosticLogs.value = (_diagnosticLogs.value + "[Conference Error] ${e.message}. Falling back to hold + merge.").takeLast(DIAGNOSTIC_LINES)
             false
         }
     }
@@ -1630,7 +1641,7 @@ class LinphoneSipManager(
             // A still-ringing call cannot join the mixer: it would end up outside the
             // conference once answered and nobody would hear anybody.
             if (!sec.isConnected) {
-                _diagnosticLogs.value = (_diagnosticLogs.value + "[Conference] Line 2 has not answered yet. Merge after it connects.").takeLast(50)
+                _diagnosticLogs.value = (_diagnosticLogs.value + "[Conference] Line 2 has not answered yet. Merge after it connects.").takeLast(DIAGNOSTIC_LINES)
                 return
             }
             val p1 = ConferenceParticipant(
@@ -1656,7 +1667,7 @@ class LinphoneSipManager(
                 secondaryCall = null,
                 isOnHold = false
             )
-            _diagnosticLogs.value = (_diagnosticLogs.value + "[Conference] Merged calls into multi-party conference session (2 participants)").takeLast(50)
+            _diagnosticLogs.value = (_diagnosticLogs.value + "[Conference] Merged calls into multi-party conference session (2 participants)").takeLast(DIAGNOSTIC_LINES)
 
             core?.let { c ->
                 try {
@@ -1676,7 +1687,7 @@ class LinphoneSipManager(
                         conf = c.createConferenceWithParams(confParams)
                     }
                     if (conf == null) {
-                        _diagnosticLogs.value = (_diagnosticLogs.value + "[Conference Error] Could not create local conference").takeLast(50)
+                        _diagnosticLogs.value = (_diagnosticLogs.value + "[Conference Error] Could not create local conference").takeLast(DIAGNOSTIC_LINES)
                         return
                     }
 
@@ -1689,11 +1700,11 @@ class LinphoneSipManager(
                     try { c.isMicEnabled = !_isMuted.value } catch (_: Throwable) {}
                     try { applyAudioRoute(c, _isSpeakerOn.value) } catch (_: Throwable) {}
 
-                    _diagnosticLogs.value = (_diagnosticLogs.value + "[Conference Audio] ${calls.size} calls added to the mixer").takeLast(50)
+                    _diagnosticLogs.value = (_diagnosticLogs.value + "[Conference Audio] ${calls.size} calls added to the mixer").takeLast(DIAGNOSTIC_LINES)
                     startConferenceStatsLogger()
                 } catch (e: Throwable) {
                     Log.e(TAG, "Linphone merge into conference: ${e.message}", e)
-                    _diagnosticLogs.value = (_diagnosticLogs.value + "[Conference Error] ${e.message}").takeLast(50)
+                    _diagnosticLogs.value = (_diagnosticLogs.value + "[Conference Error] ${e.message}").takeLast(DIAGNOSTIC_LINES)
                 }
             }
         }
@@ -1704,7 +1715,7 @@ class LinphoneSipManager(
         if (current is CallState.Connected && current.isConference) {
             val removed = current.participants.firstOrNull { it.id == participantId }
             val updated = current.participants.filterNot { it.id == participantId }
-            _diagnosticLogs.value = (_diagnosticLogs.value + "[Conference] Participant removed: $participantId").takeLast(50)
+            _diagnosticLogs.value = (_diagnosticLogs.value + "[Conference] Participant removed: $participantId").takeLast(DIAGNOSTIC_LINES)
 
             // Actually drop that caller's SIP leg; otherwise they stay in the audio mix
             val c = core
@@ -1729,7 +1740,7 @@ class LinphoneSipManager(
                         isConference = false,
                         participants = emptyList()
                     )
-                    _diagnosticLogs.value = (_diagnosticLogs.value + "[Conference] Reverted to 1-on-1 call with ${remaining.displayName}").takeLast(50)
+                    _diagnosticLogs.value = (_diagnosticLogs.value + "[Conference] Reverted to 1-on-1 call with ${remaining.displayName}").takeLast(DIAGNOSTIC_LINES)
                 } else {
                     hangupCall()
                 }
@@ -1768,7 +1779,7 @@ class LinphoneSipManager(
                 secondaryCall = newSec,
                 isOnHold = false
             )
-            _diagnosticLogs.value = (_diagnosticLogs.value + "[Call] Swapped active and held lines. Active: $newPrimaryName").takeLast(50)
+            _diagnosticLogs.value = (_diagnosticLogs.value + "[Call] Swapped active and held lines. Active: $newPrimaryName").takeLast(DIAGNOSTIC_LINES)
 
             core?.let { c ->
                 try {
@@ -1803,7 +1814,7 @@ class LinphoneSipManager(
         if (current != null) {
             _callState.value = current.copy(secondaryCall = null, isOnHold = false)
         }
-        _diagnosticLogs.value = (_diagnosticLogs.value + "[Call] Line 2 ended manually. Line 1 resumed.").takeLast(50)
+        _diagnosticLogs.value = (_diagnosticLogs.value + "[Call] Line 2 ended manually. Line 1 resumed.").takeLast(DIAGNOSTIC_LINES)
     }
 
     private fun updateConnectedStateIfActive() {
@@ -1852,7 +1863,7 @@ class LinphoneSipManager(
                     else -> ""
                 }
             Log.i(TAG, line)
-            _diagnosticLogs.value = (_diagnosticLogs.value + line).takeLast(50)
+            _diagnosticLogs.value = (_diagnosticLogs.value + line).takeLast(DIAGNOSTIC_LINES)
         } catch (e: Throwable) {
             Log.w(TAG, "Call quality: ${e.message}")
         }
@@ -1872,7 +1883,8 @@ class LinphoneSipManager(
 
         /** SDK log lines that repeat all the time and say nothing about a problem */
         // Only OPTIONS transactions: an INVITE also lists OPTIONS in its Allow header
-        private val OPTIONS_CSEQ = Regex("CSeq:\\s*\\d+\\s+OPTIONS")
+        // (and the voicemail NOTIFYs the switch sends after each registration)
+        private val OPTIONS_CSEQ = Regex("CSeq:\\s*\\d+\\s+OPTIONS|Event: message-summary")
 
         private fun isRoutineSdkLine(line: String): Boolean =
             OPTIONS_CSEQ.containsMatchIn(line) ||
