@@ -99,6 +99,10 @@ fun SoftphoneMainScreen(
                     launchSingleTop = true
                 }
             }
+        } else if (callState is CallState.Idle && currentRoute == Screen.ActiveCall.route) {
+            // The call is over (its "Call Ended" reason has been shown): back to the dialer
+            // instead of leaving an empty "Ready / Idle" call screen
+            navController.popBackStack()
         }
     }
 

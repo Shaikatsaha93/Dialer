@@ -452,7 +452,8 @@ class LinphoneSipManager(
                     val wasMissed = (_callState.value is CallState.Incoming)
                     stopDurationTimer()
                     try { core.isMicEnabled = true } catch (_: Throwable) {}
-                    _callState.value = CallState.Disconnected(reason = message.ifBlank { "Call Ended" })
+                    val failure = failureReason(call, state)
+                    _callState.value = CallState.Disconnected(reason = failure ?: message.ifBlank { "Call Ended" })
                     currentLinphoneCall = null
                     primaryLinphoneCall = null
                     secondaryLinphoneCall = null
@@ -460,7 +461,8 @@ class LinphoneSipManager(
 
                     scope.launch {
                         refreshBalanceSoon()
-                        delay(1200)
+                        // A failed call keeps its reason on screen long enough to read
+                        delay(if (failure != null) 4000 else 1500)
                         if (_callState.value is CallState.Disconnected) {
                             _callState.value = CallState.Idle
                             _isMuted.value = false
@@ -603,6 +605,29 @@ class LinphoneSipManager(
 
     private fun liveCalls(c: Core, exclude: Call? = null): List<Call> =
         c.calls.filter { it != exclude && it.state !in TERMINAL_STATES }
+
+    /**
+     * Why an outgoing call did not go through, in words an agent understands, with the SIP code
+     * for the admin ("Number not found (404)"); null when the call simply ended.
+     */
+    private fun failureReason(call: Call, state: Call.State): String? {
+        val info = call.errorInfo
+        val code = info?.protocolCode ?: 0
+        if (code < 300 && state != Call.State.Error) return null
+        val text = when (code) {
+            0 -> "No answer from the server. Check the internet connection"
+            403 -> "Call not allowed (check balance or number)"
+            404, 484, 604 -> "Number not found"
+            408 -> "No answer from the server. Check the internet connection"
+            480 -> "Number not reachable"
+            486, 600 -> "Busy"
+            487 -> "Call cancelled"
+            488, 606 -> "Call not accepted by the server"
+            in 500..599 -> "Server error"
+            else -> info?.phrase?.takeIf { it.isNotBlank() } ?: "Call failed"
+        }
+        return if (code > 0) "$text ($code)" else text
+    }
 
     private fun userPart(uri: String): String =
         uri.removePrefix("sip:").removePrefix("sips:").substringBefore("@").substringBefore(";")
