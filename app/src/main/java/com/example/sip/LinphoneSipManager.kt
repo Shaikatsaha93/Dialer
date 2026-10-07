@@ -1,8 +1,13 @@
 package com.example.sip
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.LinkProperties
+import android.net.Network
 import android.media.AudioManager
 import android.util.Log
+import java.net.Inet4Address
+import java.net.Inet6Address
 import com.example.data.model.AccountBalance
 import com.example.data.repository.CallRecordings
 import com.example.data.repository.SettingsRepository
@@ -806,6 +811,7 @@ class LinphoneSipManager(
             newCore.start()
             core = newCore
             applySettings(currentSettings)
+            watchNetworkFamily()
             Log.i(TAG, "Linphone Core initialized and started successfully.")
             _diagnosticLogs.value = (_diagnosticLogs.value + "[Linphone] Core started successfully").takeLast(DIAGNOSTIC_LINES)
         } catch (e: Throwable) {
@@ -841,24 +847,66 @@ class LinphoneSipManager(
     }
 
     /**
-     * IPv4 or IPv6 for SIP and voice. Bangladeshi mobile networks are now often IPv6-only (the
-     * phone reaches IPv4 sites through the operator's NAT64 / 464XLAT). With IPv6 on, the app
-     * then registered and was reachable, but put its IPv6 address in calls, which an IPv4-only
-     * switch cannot answer or send voice to: calls failed on mobile data and worked on Wi-Fi.
-     * A switch given as an IPv4 address therefore always gets IPv4 (Android's 464XLAT carries it
-     * on IPv6-only networks); the IPv6 setting only applies to a switch with a host name.
+     * IPv4 or IPv6 for SIP and voice, chosen from the network the phone is on.
+     *
+     * Bangladeshi mobile data is now often IPv6-only: Android reaches IPv4 servers through the
+     * operator's NAT64, and the operator rewrites the SIP messages on the way (its SIP ALG): the
+     * switch's IPv4 addresses arrive as NAT64 IPv6 ones (64:ff9b::a.b.c.d), in the SDP too.
+     * An IPv4-only app then cannot send voice or the BYE to them: the call connected, stayed
+     * silent and was cut. On such a network the app therefore runs IPv6 (the operator translates
+     * both ways); on Wi-Fi and other IPv4 networks it runs IPv4, unless the IPv6 setting is on
+     * and the switch has a host name (an IPv4 switch is never reached over IPv6 there).
      */
-    private fun applyIpFamily(c: Core) {
+    private fun applyIpFamily(c: Core): Boolean {
         val host = activeAccountModel?.domain?.trim().orEmpty()
             .removePrefix("sip:").removePrefix("sips:").substringBefore(";").substringBefore("/")
             .let { if (it.startsWith("[")) it else it.substringBefore(":") }
         val ipv4Switch = IPV4_ADDRESS.matches(host)
-        val ipv6 = currentSettings.ipv6Enabled && !ipv4Switch
-        if (c.isIpv6Enabled != ipv6) {
-            c.isIpv6Enabled = ipv6
-            val why = if (ipv4Switch && currentSettings.ipv6Enabled) " (switch $host is IPv4)" else ""
-            Log.i(TAG, "IPv6 ${if (ipv6) "on" else "off"}$why")
-            _diagnosticLogs.value = (_diagnosticLogs.value + "[Network] IPv6 ${if (ipv6) "on" else "off"}$why").takeLast(DIAGNOSTIC_LINES)
+        val ipv6OnlyNetwork = isIpv6OnlyNetwork()
+        val ipv6 = ipv6OnlyNetwork || (currentSettings.ipv6Enabled && !ipv4Switch)
+        if (c.isIpv6Enabled == ipv6) return false
+        c.isIpv6Enabled = ipv6
+        val why = when {
+            ipv6OnlyNetwork -> " (IPv6-only mobile network)"
+            ipv4Switch && currentSettings.ipv6Enabled -> " (switch $host is IPv4)"
+            else -> ""
+        }
+        Log.i(TAG, "IPv6 ${if (ipv6) "on" else "off"}$why")
+        _diagnosticLogs.value = (_diagnosticLogs.value + "[Network] IPv6 ${if (ipv6) "on" else "off"}$why").takeLast(DIAGNOSTIC_LINES)
+        return true
+    }
+
+    /**
+     * The current network has IPv6 but no real IPv4 (192.0.0.x is Android's 464XLAT address,
+     * which only exists because the network is IPv6-only).
+     */
+    private fun isIpv6OnlyNetwork(): Boolean {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
+        val addresses = try {
+            cm.getLinkProperties(cm.activeNetwork)?.linkAddresses?.map { it.address }
+        } catch (_: Throwable) {
+            null
+        } ?: return false
+        val hasIpv4 = addresses.any { it is Inet4Address && !it.hostAddress.orEmpty().startsWith("192.0.0.") }
+        val hasIpv6 = addresses.any { it is Inet6Address && !it.isLinkLocalAddress && !it.isLoopbackAddress }
+        return hasIpv6 && !hasIpv4
+    }
+
+    /** Wi-Fi <-> mobile data: pick IPv4 or IPv6 again for the new network (not during a call). */
+    private fun watchNetworkFamily() {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
+        try {
+            cm.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
+                override fun onLinkPropertiesChanged(network: Network, linkProperties: LinkProperties) {
+                    scope.launch {
+                        val c = core ?: return@launch
+                        if (c.callsNb > 0) return@launch
+                        if (applyIpFamily(c)) c.refreshRegisters()
+                    }
+                }
+            })
+        } catch (e: Throwable) {
+            Log.w(TAG, "Network watch: ${e.message}")
         }
     }
 
