@@ -139,7 +139,9 @@ dependencies {
   implementation(libs.androidx.lifecycle.runtime.ktx)
   implementation(libs.androidx.lifecycle.viewmodel.compose)
   implementation(libs.androidx.navigation.compose)
-  implementation("org.linphone:linphone-sdk-android:5.2.+")
+  // Exact version: "5.2.+" made every build list versions on all Linphone servers, and the build
+  // failed whenever one of them (gitlab.linphone.org) was down
+  implementation("org.linphone:linphone-sdk-android:5.2.112")
   implementation(libs.androidx.media)
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
