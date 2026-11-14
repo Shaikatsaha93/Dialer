@@ -70,15 +70,19 @@ val fetchLinphoneWindows by tasks.registering(Sync::class) {
 
 tasks.matching { it.name == "prepareAppResources" }.configureEach { dependsOn(fetchLinphoneWindows) }
 
+// Set by the GitHub release workflow (1.0.<run number>, same as the Android app); the app compares
+// it with desktop-update.json to offer updates. Windows installers need MAJOR.MINOR.BUILD numbers.
+val desktopVersion = System.getenv("VERSION_NAME")?.takeIf { it.matches(Regex("""\d+\.\d+\.\d+""")) } ?: "1.0.0"
+
 compose.desktop {
   application {
     mainClass = "com.example.desktop.MainKt"
-    jvmArgs += listOf("-Dfile.encoding=UTF-8")
+    jvmArgs += listOf("-Dfile.encoding=UTF-8", "-Ddialer.version=$desktopVersion")
 
     nativeDistributions {
       targetFormats(TargetFormat.Msi, TargetFormat.Exe)
       packageName = "Dialer"
-      packageVersion = "1.0.0"
+      packageVersion = desktopVersion
       description = "SIP softphone"
       vendor = "Dialer"
       // The DLLs are copied next to the app (see appResourcesRootDir below)

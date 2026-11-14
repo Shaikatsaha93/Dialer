@@ -13,6 +13,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,6 +44,8 @@ import com.example.desktop.firebase.DesktopFirebaseConfig
 import com.example.desktop.firebase.DesktopLicenseManager
 import com.example.desktop.firebase.FirebaseRest
 import com.example.desktop.sip.DesktopSipManager
+import com.example.desktop.update.DesktopUpdateDialog
+import com.example.desktop.update.DesktopUpdater
 import com.example.platform.formatMediumDate
 import com.example.sip.CallEvent
 import com.example.ui.platform.DesktopToast
@@ -59,8 +62,11 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
-/** Same as packageVersion in desktopApp/build.gradle.kts */
-private const val DESKTOP_VERSION = "1.0.0"
+/** packageVersion from desktopApp/build.gradle.kts, passed in by the installer's launcher */
+private val DESKTOP_VERSION: String = System.getProperty("dialer.version") ?: "1.0.0"
+
+/** How often the app, usually left running in the tray, looks for a newer release */
+private const val UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000L
 
 /** Events the window reacts to (tray notifications, bringing the window up for a call). */
 private object DesktopEvents {
@@ -97,6 +103,33 @@ fun main() {
     AppGraph.admin = admin
     AppGraph.chatRepository = chat
     AppGraph.appVersion = DESKTOP_VERSION
+
+    val updater = DesktopUpdater(DESKTOP_VERSION)
+    AppGraph.checkForUpdates = {
+        appScope.launch {
+            val update = updater.check()
+            DesktopToast.show(
+                when {
+                    update != null -> "Dialer ${update.version} is available"
+                    updater.lastError != null -> "Could not check for updates (${updater.lastError})"
+                    else -> "Dialer is up to date ($DESKTOP_VERSION)"
+                }
+            )
+        }
+    }
+    appScope.launch {
+        delay(10_000)
+        var announced = ""
+        while (true) {
+            val update = updater.check()
+            if (update != null && update.version != announced) {
+                announced = update.version
+                DesktopEvents.notification =
+                    Notification("Dialer update available", "Version ${update.version} is ready to install", Notification.Type.Info)
+            }
+            delay(UPDATE_CHECK_INTERVAL_MS)
+        }
+    }
 
     sipManager.applySettings(settingsRepository.settings.value)
     sipManager.initializeSdk()
@@ -182,13 +215,13 @@ fun main() {
             icon = appIcon,
             alwaysOnTop = callState is CallState.Incoming
         ) {
-            DesktopApp()
+            DesktopApp(updater, onInstallerStarted = { quit() })
         }
     }
 }
 
 @Composable
-private fun DesktopApp() {
+private fun DesktopApp(updater: DesktopUpdater, onInstallerStarted: () -> Unit) {
     val viewModel: SoftphoneViewModel = viewModel(factory = SoftphoneViewModel.Factory)
     val themeMode by viewModel.themeMode.collectAsState()
     val license by AppGraph.license.state.collectAsState()
@@ -219,6 +252,18 @@ private fun DesktopApp() {
                 )
             }
             DesktopToastHost(Modifier.align(Alignment.BottomCenter))
+        }
+
+        // Not in the middle of a call: the installer closes Dialer
+        val updateState by updater.state.collectAsState()
+        val callState by AppGraph.sipManager.callState.collectAsState()
+        val scope = rememberCoroutineScope()
+        if (callState is CallState.Idle) {
+            DesktopUpdateDialog(
+                state = updateState,
+                onUpdate = { update -> scope.launch { if (updater.downloadAndInstall(update)) onInstallerStarted() } },
+                onLater = updater::dismiss
+            )
         }
     }
 }

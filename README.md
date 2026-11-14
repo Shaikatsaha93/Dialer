@@ -168,9 +168,11 @@ If a device already has the app signed with a different key, Android refuses the
 
 ### Automatic updates
 
-Every push to `main` that changes the app (`app/`, `shared/`, Gradle files) runs the **Release APK** workflow (`.github/workflows/release.yml`). It builds a signed APK and publishes it as the newest [GitHub release](https://github.com/Shaikatsaha93/Dialer/releases), together with `update.json`. It can also be started by hand from the **Actions** tab (**Run workflow**).
+Every push to `main` that changes the app (`app/`, `shared/`, `desktopApp/`, Gradle files) runs the **Release** workflow (`.github/workflows/release.yml`). It builds a signed APK and publishes it as the newest [GitHub release](https://github.com/Shaikatsaha93/Dialer/releases), together with `update.json`. A second job then builds the Windows installer (`Dialer-Windows-Setup.exe`) for the same version on a Windows runner and adds it to that release with `desktop-update.json`. The workflow can also be started by hand from the **Actions** tab (**Run workflow**).
 
-When the app is opened (at most once an hour) it reads `update.json` from the latest release. If that version is newer, it shows **Update available**. **Update** downloads the APK and opens Android's install screen; accounts and history are kept. The first time, Android asks to allow installs from this app.
+When the Android app is opened (at most once an hour) it reads `update.json` from the latest release. If that version is newer, it shows **Update available**. **Update** downloads the APK and opens Android's install screen; accounts and history are kept. The first time, Android asks to allow installs from this app.
+
+The Windows app checks `desktop-update.json` 10 seconds after it starts and then every 6 hours (it usually keeps running in the tray). A newer version shows a Windows notification and an **Update available** dialog (not during a call). **Update** downloads the installer, starts it and closes Dialer; the installer upgrades the existing install, so accounts, settings and history are kept. Open Dialer again when it finishes. **Settings → Check for updates** checks right away. Installs older than the first release with this feature (version 1.0.0) have no updater and need the new installer once by hand.
 
 The workflow needs these repository secrets (**Settings → Secrets and variables → Actions**):
 

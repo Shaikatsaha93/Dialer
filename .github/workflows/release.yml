@@ -1,12 +1,13 @@
 # Builds a signed APK on every push to main and publishes it as the latest GitHub release.
 # The app (AppUpdater) reads update.json from the latest release and offers the new version
-# to every user. Repository secrets it needs (Settings > Secrets and variables > Actions):
+# to every user. The desktop job then adds the Windows installer and desktop-update.json,
+# which the Windows app (DesktopUpdater) reads the same way. Repository secrets it needs (Settings > Secrets and variables > Actions):
 #   SIGNING_KEYSTORE_BASE64     base64 of the keystore every earlier APK was signed with
 #   SIGNING_STORE_PASSWORD      keystore password
 #   SIGNING_KEY_ALIAS           key alias in the keystore
 #   SIGNING_KEY_PASSWORD        key password
 #   GOOGLE_SERVICES_JSON_BASE64 base64 of app/google-services.json (Firebase)
-name: Release APK
+name: Release
 
 on:
   push:
@@ -14,6 +15,7 @@ on:
     paths:
       - "app/**"
       - "shared/**"
+      - "desktopApp/**"
       - "gradle/**"
       - "*.gradle.kts"
       - ".github/workflows/release.yml"
@@ -101,3 +103,50 @@ jobs:
             Dialer-arm64-v8a.apk
             Dialer-armeabi-v7a.apk
             update.json
+
+  # Windows installer for the same version, added to the release made above
+  desktop:
+    needs: release
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version
+        run: echo "VERSION_NAME=1.0.$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # The Linphone SDK for Windows (about 300 MB) is downloaded once, then kept here
+      - uses: actions/cache@v4
+        with:
+          path: desktopApp/build/linphone
+          key: linphone-sdk-win64-${{ hashFiles('desktopApp/build.gradle.kts') }}
+
+      - name: Build installer
+        run: |
+          ./gradlew :desktopApp:packageExe --no-daemon
+          cp desktopApp/build/compose/binaries/main/exe/Dialer-*.exe Dialer-Windows-Setup.exe
+
+      - name: desktop-update.json
+        run: |
+          NOTES="$(git log -1 --format=%B | head -n 5)"
+          URL="https://github.com/${{ github.repository }}/releases/download/v$VERSION_NAME/Dialer-Windows-Setup.exe"
+          jq -n --arg v "$VERSION_NAME" --arg url "$URL" --arg notes "$NOTES"             '{version: $v, installerUrl: $url, notes: $notes}' > desktop-update.json
+          cat desktop-update.json
+
+      - name: Add to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION_NAME }}
+          make_latest: true
+          files: |
+            Dialer-Windows-Setup.exe
+            desktop-update.json
