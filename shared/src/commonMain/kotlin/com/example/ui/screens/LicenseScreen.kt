@@ -40,6 +40,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -55,7 +56,7 @@ import com.example.ui.theme.glass
 fun LicenseScreen(
     state: LicenseState,
     installId: String?,
-    onSubmit: (name: String, phone: String, onResult: (String?) -> Unit) -> Unit,
+    onSubmit: (name: String, phone: String, companyCode: String, onResult: (String?) -> Unit) -> Unit,
     onRetry: () -> Unit
 ) {
     var showAdminSignIn by rememberSaveable { mutableStateOf(false) }
@@ -126,9 +127,10 @@ fun LicenseScreen(
 }
 
 @Composable
-private fun RequestForm(onSubmit: (String, String, (String?) -> Unit) -> Unit) {
+private fun RequestForm(onSubmit: (String, String, String, (String?) -> Unit) -> Unit) {
     var name by rememberSaveable { mutableStateOf("") }
     var phone by rememberSaveable { mutableStateOf("") }
+    var companyCode by rememberSaveable { mutableStateOf("") }
     var sending by rememberSaveable { mutableStateOf(false) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
 
@@ -152,6 +154,21 @@ private fun RequestForm(onSubmit: (String, String, (String?) -> Unit) -> Unit) {
         shape = RoundedCornerShape(12.dp),
         modifier = Modifier.fillMaxWidth().testTag("input_license_phone")
     )
+    OutlinedTextField(
+        value = companyCode,
+        // Kept as typed (changing the text while typing confuses keyboards); upper-cased when sent
+        onValueChange = { companyCode = it.take(20) },
+        label = { Text("Company code (optional)") },
+        supportingText = { Text("Delivery riders: the code from your company. Leave empty otherwise.") },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(
+            capitalization = KeyboardCapitalization.Characters,
+            autoCorrectEnabled = false,
+            keyboardType = KeyboardType.Ascii
+        ),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth().testTag("input_license_company")
+    )
     error?.let {
         Text(it, color = CallActionRed, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
     }
@@ -159,7 +176,7 @@ private fun RequestForm(onSubmit: (String, String, (String?) -> Unit) -> Unit) {
         onClick = {
             sending = true
             error = null
-            onSubmit(name, phone) { result ->
+            onSubmit(name, phone, companyCode) { result ->
                 sending = false
                 error = result
             }

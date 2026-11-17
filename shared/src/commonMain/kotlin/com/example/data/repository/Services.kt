@@ -31,8 +31,11 @@ interface LicenseService {
     /** This install's id (Firebase uid), shown to the user so the admin can find the request. */
     val installId: String?
     fun refresh()
-    /** Sends an access request; [onResult] gets null on success or an error text. */
-    fun submitRequest(name: String, phone: String, onResult: (String?) -> Unit)
+    /**
+     * Sends an access request; [onResult] gets null on success or an error text. A non-blank
+     * [companyCode] (a delivery company's code, companies/{code}) sends it to that company's admin.
+     */
+    fun submitRequest(name: String, phone: String, companyCode: String, onResult: (String?) -> Unit)
     fun signInAdmin(email: String, password: String, onResult: (String?) -> Unit)
     fun signOutAdmin()
 
@@ -40,7 +43,28 @@ interface LicenseService {
         const val COLLECTION = "devices"
         const val ADMIN_EMAIL = "shaikatsaha93@gmail.com"
         const val DEFAULT_DAYS = 30L
+
+        /** A company code as stored (companies/{code}): letters and digits, upper case. */
+        fun normalizeCompanyCode(code: String): String =
+            code.filter { it.isLetterOrDigit() }.uppercase().take(20)
     }
+}
+
+/** Delivery riders: sharing the live location with their company's dispatcher. */
+sealed class DutyState {
+    /** Not a company rider (or not on Android): no duty switch. */
+    data object Unavailable : DutyState()
+    data object Off : DutyState()
+    /** [lastSentAt]: epoch millis of the last location sent, null before the first fix. */
+    data class On(val lastSentAt: Long?) : DutyState()
+    /** On duty, but locations cannot be sent (location off, no permission, not allowed). */
+    data class Problem(val message: String) : DutyState()
+}
+
+interface DutyService {
+    val state: StateFlow<DutyState>
+    /** Call with true only after the location permission was granted. */
+    fun setOnDuty(on: Boolean)
 }
 
 enum class DeviceStatus { PENDING, ACTIVE, EXPIRED, DISABLED }

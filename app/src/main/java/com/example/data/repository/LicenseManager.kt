@@ -57,6 +57,10 @@ class LicenseManager(
     private val _isAdmin = MutableStateFlow(false)
     override val isAdmin: StateFlow<Boolean> = _isAdmin.asStateFlow()
 
+    /** Set while this install is an approved rider of a delivery company (for location sharing). */
+    private val _rider = MutableStateFlow<RiderInfo?>(null)
+    val rider: StateFlow<RiderInfo?> = _rider.asStateFlow()
+
     private val auth get() = FirebaseAuth.getInstance()
     private val firestore get() = FirebaseFirestore.getInstance()
 
@@ -125,6 +129,7 @@ class LicenseManager(
     private fun enterAdminMode() {
         listener?.remove()
         listener = null
+        _rider.value = null
         _isAdmin.value = true
         _state.value = LicenseState.Approved(null)
     }
@@ -149,6 +154,10 @@ class LicenseManager(
     }
 
     private fun onSnapshot(doc: DocumentSnapshot) {
+        // Our own write the server has not accepted yet (e.g. a request with a wrong company
+        // code): wait for the server's answer instead of flashing "Pending" and back
+        if (doc.metadata.hasPendingWrites()) return
+        if (doc.getBoolean("approved") != true) _rider.value = null
         if (!doc.exists()) {
             _state.value = LicenseState.NeedsRequest
             return
@@ -164,6 +173,9 @@ class LicenseManager(
                 onDenied()
             } else {
                 prefs.edit().putBoolean(KEY_WAS_APPROVED, true).apply()
+                _rider.value = doc.getString("companyId")?.takeIf { it.isNotBlank() }?.let {
+                    RiderInfo(it, doc.getString("name").orEmpty(), doc.getString("phone").orEmpty())
+                }
                 _state.value = LicenseState.Approved(expiresAt.time)
                 provisionSipAccount(doc)
             }
@@ -176,6 +188,7 @@ class LicenseManager(
     }
 
     private fun onDenied() {
+        _rider.value = null
         _state.value = LicenseState.Denied
         removeProvisionedAccount()
         markExpired()
@@ -216,8 +229,11 @@ class LicenseManager(
             .addOnFailureListener { Log.d(TAG, "No expiry to record (blocked or not yet expired)") }
     }
 
-    /** Sends the access request. Only name, phone, device, approved (false) and createdAt are allowed by the rules. */
-    override fun submitRequest(name: String, phone: String, onResult: (String?) -> Unit) {
+    /**
+     * Sends the access request. Only name, phone, device, approved (false), createdAt and an
+     * existing company's code (companyId) are allowed by the rules.
+     */
+    override fun submitRequest(name: String, phone: String, companyCode: String, onResult: (String?) -> Unit) {
         val uid = auth.currentUser?.uid
         if (uid == null) {
             onResult("Not signed in yet. Check the internet connection.")
@@ -231,11 +247,17 @@ class LicenseManager(
             "approved" to false,
             "createdAt" to FieldValue.serverTimestamp()
         )
-        firestore.collection(COLLECTION).document(uid).set(data)
+        val company = LicenseService.normalizeCompanyCode(companyCode)
+        firestore.collection(COLLECTION).document(uid)
+            .set(if (company.isEmpty()) data else data + ("companyId" to company))
             .addOnSuccessListener { onResult(null) }
             .addOnFailureListener { e ->
                 Log.w(TAG, "Request failed: ${e.message}")
-                onResult(e.localizedMessage ?: "Request failed")
+                val denied = (e as? FirebaseFirestoreException)?.code == FirebaseFirestoreException.Code.PERMISSION_DENIED
+                onResult(
+                    if (denied && company.isNotEmpty()) "Company code $company not found. Check it with your company."
+                    else e.localizedMessage ?: "Request failed"
+                )
             }
     }
 
@@ -278,6 +300,9 @@ class LicenseManager(
             Log.i(TAG, "Provisioned SIP account removed (access ended)")
         }
     }
+
+    /** An approved delivery rider: [companyId] is the company's code (companies/{code}). */
+    data class RiderInfo(val companyId: String, val name: String, val phone: String)
 
     companion object {
         private const val TAG = "LicenseManager"

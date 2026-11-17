@@ -29,4 +29,6 @@ object AppGraph {
     var appVersion: String = ""
     /** Looks for a newer release right away; null where the platform has no in-app updates */
     var checkForUpdates: (() -> Unit)? = null
+    /** Live location for delivery riders; null where the platform cannot share it (Windows) */
+    var duty: com.example.data.repository.DutyService? = null
 }

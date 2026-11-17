@@ -23,3 +23,7 @@ expect fun rememberContactsPermissionRequest(onResult: (Boolean) -> Unit): () ->
 /** Asks for the microphone again when it is not allowed (e.g. denied once): a call without it is silent. */
 @Composable
 expect fun EnsureMicrophonePermission()
+
+/** Returns a function that asks for the location permission (delivery riders going on duty). */
+@Composable
+expect fun rememberLocationPermissionRequest(onResult: (Boolean) -> Unit): () -> Unit

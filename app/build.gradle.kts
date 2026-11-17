@@ -154,6 +154,9 @@ dependencies {
   // Admin approval / subscription: anonymous sign-in + devices/{uid} in Firestore
   implementation(libs.firebase.auth)
   implementation(libs.firebase.firestore)
+  // Delivery riders: live location (Realtime Database) from the phone's fused location provider
+  implementation("com.google.firebase:firebase-database")
+  implementation("com.google.android.gms:play-services-location:21.3.0")
 
   // Uncomment these three (firebase-auth is already on) to use Google Sign-In via Credential Manager:
   // implementation(libs.androidx.credentials)

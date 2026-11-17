@@ -28,6 +28,10 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <!-- Install new versions downloaded from GitHub releases (AppUpdater) -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Delivery riders share their location while "On duty" (foreground service, no background permission) -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
 
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
@@ -93,6 +97,12 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Keeps the SIP account registered so incoming VoIP calls can ring" />
         </service>
+
+        <!-- Delivery riders: sends the location to the company's dispatcher while on duty -->
+        <service
+            android:name=".location.LocationService"
+            android:foregroundServiceType="location"
+            android:exported="false" />
 
         <!-- Shares call recordings with other apps -->
         <provider

@@ -3,10 +3,33 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // The admin (Firebase email/password user). Must match LicenseManager.ADMIN_EMAIL.
+    // Sees and manages everything, and creates the companies.
     function isAdmin() {
       return request.auth != null &&
         request.auth.token.firebase.sign_in_provider == 'password' &&
         request.auth.token.email == 'shaikatsaha93@gmail.com';
+    }
+
+    function company(cid) {
+      return get(/databases/$(database)/documents/companies/$(cid)).data;
+    }
+
+    // A company's admin: a Firebase email/password user listed in companies/{cid}.adminUids.
+    // Manages only that company's riders (devices with companyId == cid).
+    function isCompanyAdmin(cid) {
+      return request.auth != null && request.auth.uid in company(cid).adminUids;
+    }
+
+    // The company's subscription (set by the admin). Its riders are locked out when it ends.
+    function companyActive(cid) {
+      return company(cid).get('expiresAt', null) == null || company(cid).expiresAt > request.time;
+    }
+
+    // One record per delivery company: companies/{code}. The code (e.g. PATHAO7) is what
+    // riders type in the access request.
+    match /companies/{cid} {
+      allow read: if isAdmin() || (request.auth != null && request.auth.uid in resource.data.adminUids);
+      allow write: if isAdmin();
     }
 
     // One record per app install: devices/{uid}
@@ -24,25 +47,41 @@ service cloud.firestore {
       function changedOnly(keys) {
         return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
       }
+      function companyId() {
+        return resource.data.get('companyId', null);
+      }
+
+      // A company admin sees and manages the riders who joined with the company's code. The
+      // rider stays in that company, and only access and SIP details can change.
+      allow read, delete: if companyId() != null && isCompanyAdmin(companyId());
+      allow update: if companyId() != null && isCompanyAdmin(companyId()) &&
+        request.resource.data.get('companyId', null) == companyId() &&
+        changedOnly(['approved', 'expiresAt', 'approvedAt', 'name',
+          'sipUsername', 'sipPassword', 'sipDomain', 'sipPort', 'sipDisplayName']);
 
       // Readable by its own install when:
       // - it does not exist yet (new install), or
-      // - approved == true and not expired, or
+      // - approved == true, not expired, and its company (if any) is still subscribed, or
       // - not approved and holds no SIP password (pending request).
       // Expired, or switched off while holding a SIP password: denied,
       // so the app locks and the password stays hidden.
       allow get: if isOwner() && (
         resource == null ||
-        (resource.data.approved == true && notExpired()) ||
+        (resource.data.approved == true && notExpired() &&
+          (companyId() == null || companyActive(companyId()))) ||
         (resource.data.approved != true && !('sipPassword' in resource.data))
       );
 
-      // The app can only create its own request, always with approved == false
+      // The app can only create its own request, always with approved == false.
+      // companyId (optional) must be an existing company's code.
       allow create: if isOwner() &&
         request.resource.data.approved == false &&
-        request.resource.data.keys().hasOnly(['name', 'phone', 'device', 'approved', 'createdAt']) &&
+        request.resource.data.keys().hasOnly(['name', 'phone', 'device', 'approved', 'createdAt', 'companyId']) &&
         request.resource.data.name is string && request.resource.data.name.size() <= 60 &&
-        request.resource.data.phone is string && request.resource.data.phone.size() <= 20;
+        request.resource.data.phone is string && request.resource.data.phone.size() <= 20 &&
+        (!('companyId' in request.resource.data) ||
+          (request.resource.data.companyId is string &&
+            exists(/databases/$(database)/documents/companies/$(request.resource.data.companyId))));
 
       // The app may make exactly two changes to its own record:
       allow update: if isOwner() && (
@@ -68,7 +107,7 @@ service cloud.firestore {
 
       // No delete from the app. Everything else (approving, blocking,
       // extending expiresAt, SIP details) is done by the admin: in the app's
-      // Admin tab or in the Firebase console.
+      // Admin tab, the web dashboard or the Firebase console.
     }
   }
 }

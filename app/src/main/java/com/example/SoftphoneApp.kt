@@ -57,6 +57,8 @@ class SoftphoneApp : Application() {
         private set
     lateinit var chatRepository: ChatRepository
         private set
+    lateinit var dutyManager: com.example.location.DutyManager
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -78,6 +80,7 @@ class SoftphoneApp : Application() {
         licenseManager = LicenseManager(this, accountRepository)
         licenseManager.start()
         adminManager = AdminManager(this)
+        dutyManager = com.example.location.DutyManager(this, licenseManager)
         chatRepository = ChatRepository(database.chatDao(), sipManager, contactsRepository, AndroidChatNotifier(this), applicationScope)
         chatRepository.start()
 
@@ -91,6 +94,7 @@ class SoftphoneApp : Application() {
         AppGraph.license = licenseManager
         AppGraph.admin = adminManager
         AppGraph.chatRepository = chatRepository
+        AppGraph.duty = dutyManager
         AppGraph.appVersion = BuildConfig.VERSION_NAME
         AppGraph.checkForUpdates = {
             applicationScope.launch(Dispatchers.Main) {

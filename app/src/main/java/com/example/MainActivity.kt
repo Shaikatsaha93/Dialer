@@ -166,6 +166,8 @@ class MainActivity : ComponentActivity() {
         if (state is LicenseState.Approved) SoftphoneApp.instance.sipManager.onPushWakeup()
         // New version published on GitHub? (at most once an hour)
         lifecycleScope.launch { SoftphoneApp.instance.appUpdater.check() }
+        // A rider who was on duty (e.g. before a reboot) shares the location again
+        SoftphoneApp.instance.dutyManager.resumeIfOnDuty()
     }
 
     private fun configureLockScreenFlags() {

@@ -1,0 +1,75 @@
+{
+  "rules": {
+    // Live locations of delivery riders, per company. Firestore holds who belongs where; these
+    // rules cannot read Firestore, so the dashboard mirrors it here:
+    //   companyAdmins/{company}/{uid} = true          written by the admin when creating a company admin
+    //   members/{company}/{uid}       = expiry millis written by the company admin when approving a rider
+    // The admin (same email as in firestore.rules) can read and write everything.
+    ".read": "auth != null && auth.token.email === 'shaikatsaha93@gmail.com' && auth.token.firebase.sign_in_provider === 'password'",
+    ".write": "auth != null && auth.token.email === 'shaikatsaha93@gmail.com' && auth.token.firebase.sign_in_provider === 'password'",
+
+    "companyAdmins": {
+      "$company": {
+        ".read": "auth != null && data.child(auth.uid).val() === true"
+      }
+    },
+
+    "members": {
+      "$company": {
+        ".read": "auth != null && root.child('companyAdmins').child($company).child(auth.uid).val() === true",
+        ".write": "auth != null && root.child('companyAdmins').child($company).child(auth.uid).val() === true",
+        "$uid": {
+          // A rider can see until when it may share its location
+          ".read": "auth != null && auth.uid === $uid",
+          ".validate": "newData.isNumber()"
+        }
+      }
+    },
+
+    // live/{company}/{uid}: the rider's latest position, overwritten on every update.
+    // The company admin can remove a rider's position (rider blocked or deleted).
+    "live": {
+      "$company": {
+        ".read": "auth != null && root.child('companyAdmins').child($company).child(auth.uid).val() === true",
+        "$uid": {
+          ".write": "auth != null && ((auth.uid === $uid && root.child('members').child($company).child($uid).isNumber() && root.child('members').child($company).child($uid).val() > now) || (root.child('companyAdmins').child($company).child(auth.uid).val() === true && !newData.exists()))",
+          ".validate": "newData.hasChildren(['lat', 'lng', 'ts', 'onDuty'])",
+          "lat": { ".validate": "newData.isNumber() && newData.val() >= -90 && newData.val() <= 90" },
+          "lng": { ".validate": "newData.isNumber() && newData.val() >= -180 && newData.val() <= 180" },
+          "ts": { ".validate": "newData.isNumber() && newData.val() <= now + 60000" },
+          "onDuty": { ".validate": "newData.isBoolean()" },
+          "accuracy": { ".validate": "newData.isNumber()" },
+          "speed": { ".validate": "newData.isNumber()" },
+          "bearing": { ".validate": "newData.isNumber()" },
+          "battery": { ".validate": "newData.isNumber()" },
+          "charging": { ".validate": "newData.isBoolean()" },
+          "name": { ".validate": "newData.isString() && newData.val().length <= 60" },
+          "phone": { ".validate": "newData.isString() && newData.val().length <= 20" },
+          "$other": { ".validate": false }
+        }
+      }
+    },
+
+    // tracks/{company}/{uid}/{yyyy-MM-dd}/{point}: the day's route. Riders only add points;
+    // the company admin can delete old days.
+    "tracks": {
+      "$company": {
+        ".read": "auth != null && root.child('companyAdmins').child($company).child(auth.uid).val() === true",
+        ".write": "auth != null && root.child('companyAdmins').child($company).child(auth.uid).val() === true",
+        "$uid": {
+          "$day": {
+            "$point": {
+              ".write": "auth != null && auth.uid === $uid && !data.exists() && root.child('members').child($company).child($uid).isNumber() && root.child('members').child($company).child($uid).val() > now",
+              ".validate": "newData.hasChildren(['lat', 'lng', 't'])",
+              "lat": { ".validate": "newData.isNumber()" },
+              "lng": { ".validate": "newData.isNumber()" },
+              "t": { ".validate": "newData.isNumber()" },
+              "speed": { ".validate": "newData.isNumber()" },
+              "$other": { ".validate": false }
+            }
+          }
+        }
+      }
+    }
+  }
+}

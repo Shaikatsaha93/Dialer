@@ -33,3 +33,7 @@ actual fun rememberContactsPermissionRequest(onResult: (Boolean) -> Unit): () ->
 
 @Composable
 actual fun EnsureMicrophonePermission() {}
+
+// Windows has no on-duty location sharing
+@Composable
+actual fun rememberLocationPermissionRequest(onResult: (Boolean) -> Unit): () -> Unit = { onResult(false) }

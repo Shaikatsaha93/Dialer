@@ -9,6 +9,7 @@ It registers to a SIP server (tested with **iTelSwitchPlus 8.0.0**), places and 
 ## Features
 
 - **Admin approval and 30-day subscription:** a new install sends an access request and stays locked until the admin approves it. An approval lasts 30 days, then the app locks itself until renewed. The admin approves, renews and blocks devices from the **Admin** tab on their own phone and gets a notification for each new request. See [Access control (admin approval)](#access-control-admin-approval).
+- **Delivery companies and live location:** each delivery company gets a code; its riders join with that code, and the company's own admin approves them and sees them live on a map in a web dashboard. Companies never see each other's riders. See [Delivery companies (live location)](#delivery-companies-live-location).
 - **Windows app:** the same screens and features on a PC, with an installer (`Dialer-1.0.0.exe`). It keeps running in the system tray so calls still ring. See [Windows app](#windows-app).
 - **Chat:** 1-to-1 and group text chat between SIP users over SIP MESSAGE (for example through Asterisk).
 - **Call recording:** switch on in Settings to record every call to a WAV file on the device (Android: the app folder; Windows: Documents\Dialer\Recordings), with play, share/show and delete.
@@ -298,6 +299,46 @@ Everything in the Admin tab can also be done in **Firestore Database → Data �
 ### Installing without a cable
 
 Build the release APK (see [Signing](#signing)) and send the file to the phone as a **document** through WhatsApp, Telegram *Saved Messages* or Google Drive. Open it on the phone, allow *Install unknown apps* for that app, and choose **Install anyway** if Play Protect warns. Install it over the old app as an update; uninstalling first creates a new Device ID.
+
+## Delivery companies (live location)
+
+Delivery companies use the app for their riders and follow them on a live map. Every company sees and manages only its own riders.
+
+### Who does what
+
+| Who | Where | What |
+|---|---|---|
+| Main admin (`ADMIN_EMAIL`) | Dashboard → **Companies** | Creates a company (its **code**, e.g. `PATHAO7`, name and subscription) and the company admin's email and password. Extends a company's subscription. |
+| Company admin | Dashboard → **Riders** and **Map** | Approves, renews, blocks and deletes the company's riders, sets their SIP accounts, and sees them live on the map with today's route. |
+| Rider | The Android app | Types the company code in the access request. After approval, switches **On duty** on the dialer screen to share the location, and off after work. |
+
+The dashboard is a web page: **https://shaikatsaha93.github.io/Dialer/** (published from [`dashboard/`](dashboard/) by `.github/workflows/dashboard.yml`). It works on any computer or phone browser; the map is OpenStreetMap, no API key needed.
+
+### What the rider sees
+
+- The access request has an optional **Company code** field. A wrong code shows "Company code … not found". Without a code the request goes to the main admin as before.
+- After approval the dialer shows an **On duty / Off duty** card. Going on duty asks for the location permission ("While using the app" is enough) and shows a permanent notification "On duty · Sharing your location", with a **Go off duty** button.
+- While on duty the phone sends its position about every 15 seconds when moving (every 2 minutes when standing), plus battery level and speed. Offline positions are kept and sent when the network is back.
+- Blocked, expired, deleted, or the company's subscription ended: sharing stops and the app locks.
+- After a reboot, sharing resumes the next time the rider opens Dialer (Android only lets a location service start from the open app).
+- OPPO, Xiaomi, Vivo and similar phones can stop apps in the background: set Dialer's battery usage to **Unrestricted**.
+
+### Where the data is
+
+- Firestore `companies/{code}`: name, `adminUids`, `adminEmails`, `expiresAt`. Rider records stay in `devices/{uid}`, with `companyId` = the code.
+- Realtime Database (free for frequent small writes): `live/{code}/{uid}` (latest position), `tracks/{code}/{uid}/{yyyy-MM-dd}` (the day's route, kept 30 days), and two lists the dashboard keeps in step with Firestore because Realtime Database rules cannot read Firestore: `companyAdmins/{code}/{uid}` and `members/{code}/{uid}` (until when the rider may share).
+- Who may read and write what is enforced by [`firestore.rules`](firestore.rules) and [`database.rules.json`](database.rules.json), not by the apps.
+
+### One-time setup
+
+In the [Firebase console](https://console.firebase.google.com), project `fir-7eb9d`:
+
+1. **Firestore Database → Rules:** paste [`firestore.rules`](firestore.rules) and click **Publish**.
+2. **Realtime Database → Rules:** paste [`database.rules.json`](database.rules.json) and click **Publish**.
+
+On GitHub: **Settings → Pages → Build and deployment → Source: GitHub Actions**, then run the **Dashboard** workflow once (Actions tab) or push a change in `dashboard/`.
+
+Testing the dashboard locally against the Firebase emulators: serve `dashboard/` on `localhost` and open it with `?emulator`.
 
 ## Receiving calls in the background
 

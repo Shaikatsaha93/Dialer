@@ -183,24 +183,30 @@ class DesktopLicenseManager(
         }
     }
 
-    override fun submitRequest(name: String, phone: String, onResult: (String?) -> Unit) {
+    override fun submitRequest(name: String, phone: String, companyCode: String, onResult: (String?) -> Unit) {
+        val company = LicenseService.normalizeCompanyCode(companyCode)
         scope.launch {
             val result = try {
                 val s = currentSession()
+                val fields = mapOf(
+                    "name" to name.trim().take(60),
+                    "phone" to phone.trim().take(20),
+                    "device" to deviceName(),
+                    "approved" to false
+                )
                 firebase.write(
                     s.idToken, "${LicenseService.COLLECTION}/${s.uid}",
-                    fields = mapOf(
-                        "name" to name.trim().take(60),
-                        "phone" to phone.trim().take(20),
-                        "device" to deviceName(),
-                        "approved" to false
-                    ),
+                    fields = if (company.isEmpty()) fields else fields + ("companyId" to company),
                     serverTimeFields = listOf("createdAt"),
                     mustExist = false
                 )
                 null
             } catch (e: Exception) {
-                e.message ?: "Request failed"
+                if (company.isNotEmpty() && (e as? FirebaseRest.FirebaseException)?.status == 403) {
+                    "Company code $company not found. Check it with your company."
+                } else {
+                    e.message ?: "Request failed"
+                }
             }
             onResult(result)
             if (result == null) refresh()

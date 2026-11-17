@@ -84,6 +84,7 @@ import com.example.data.model.RegistrationStatus
 import com.example.data.model.SipAccount
 import com.example.platform.relativeTime
 import com.example.ui.components.DtmfKeypad
+import com.example.ui.components.DutyCard
 import com.example.ui.components.ThemeModeSelector
 import com.example.ui.theme.CallActionGreen
 import com.example.ui.theme.CallActionRed
@@ -189,6 +190,8 @@ fun DialerScreen(
                         onClick = onNavigateToAccounts
                     )
 
+                    DutyCard()
+
                     OngoingCallBanner(
                         isCallActive = isCallActive,
                         onClick = onNavigateToActiveCall
@@ -282,6 +285,8 @@ fun DialerScreen(
                     pulseScale = pulseScale,
                     onClick = onNavigateToAccounts
                 )
+
+                DutyCard(Modifier.padding(top = 8.dp))
 
                 OngoingCallBanner(
                     isCallActive = isCallActive,

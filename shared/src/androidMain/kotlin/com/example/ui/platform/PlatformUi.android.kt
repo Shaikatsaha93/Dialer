@@ -68,3 +68,14 @@ actual fun EnsureMicrophonePermission() {
         }
     }
 }
+
+@Composable
+actual fun rememberLocationPermissionRequest(onResult: (Boolean) -> Unit): () -> Unit {
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
+        // Approximate location is enough to keep sharing, though less exact on the map
+        onResult(results.values.any { it })
+    }
+    return {
+        launcher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+    }
+}

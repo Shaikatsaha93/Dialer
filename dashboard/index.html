@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dialer Dispatch</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Sign-in -->
+  <section id="login" class="login hidden">
+    <form id="login-form" class="card login-card">
+      <h1>Dialer Dispatch</h1>
+      <p class="muted">Sign in with your company admin account.</p>
+      <label>Email <input id="login-email" type="email" autocomplete="username" required></label>
+      <label>Password <input id="login-password" type="password" autocomplete="current-password" required></label>
+      <p id="login-error" class="error"></p>
+      <button type="submit" class="primary">Sign in</button>
+      <button type="button" id="forgot" class="link">Forgot password?</button>
+    </form>
+  </section>
+
+  <!-- App -->
+  <section id="app" class="app hidden">
+    <header class="topbar">
+      <div class="brand">Dialer Dispatch</div>
+      <select id="company-select" aria-label="Company"></select>
+      <nav class="tabs">
+        <button data-tab="map" class="tab active">Map</button>
+        <button data-tab="riders" class="tab">Riders <span id="pending-badge" class="badge hidden"></span></button>
+        <button data-tab="companies" class="tab super-only hidden">Companies</button>
+      </nav>
+      <div class="user">
+        <span id="user-email" class="muted"></span>
+        <button id="sign-out" class="link">Sign out</button>
+      </div>
+    </header>
+    <p id="banner" class="banner hidden"></p>
+
+    <!-- Live map -->
+    <div id="tab-map" class="tab-page map-page">
+      <aside class="sidebar">
+        <div class="sidebar-head">
+          <input id="rider-search" type="search" placeholder="Search riders">
+          <label class="inline"><input id="only-duty" type="checkbox" checked> On duty only</label>
+        </div>
+        <ul id="rider-list" class="rider-list"></ul>
+        <div id="route-box" class="route-box hidden">
+          <div class="route-title" id="route-title"></div>
+          <label class="inline">Route of <input id="route-day" type="date"></label>
+          <p id="route-info" class="muted"></p>
+          <button id="route-clear" class="link">Hide route</button>
+        </div>
+      </aside>
+      <div id="map" class="map"></div>
+    </div>
+
+    <!-- Riders: approve, renew, block -->
+    <div id="tab-riders" class="tab-page hidden">
+      <div class="card">
+        <div class="row space">
+          <h2>Riders</h2>
+          <p class="muted">Riders join by typing your company code <b id="company-code"></b> in the app's access request.</p>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Name</th><th>Phone</th><th>Device</th><th>Status</th><th>SIP</th><th></th></tr></thead>
+            <tbody id="riders-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Companies (main admin only) -->
+    <div id="tab-companies" class="tab-page hidden">
+      <div class="card">
+        <h2>New company</h2>
+        <form id="company-form" class="grid-form">
+          <label>Code <input id="c-code" required maxlength="20" placeholder="PATHAO7"></label>
+          <label>Name <input id="c-name" required maxlength="60" placeholder="Pathao Delivery"></label>
+          <label>Subscription
+            <select id="c-days"><option value="30">30 days</option><option value="90">90 days</option><option value="365">1 year</option><option value="0">No limit</option></select>
+          </label>
+          <label>Admin email <input id="c-email" type="email" required></label>
+          <label>Admin password <input id="c-password" type="text" required minlength="6"></label>
+          <button type="submit" class="primary">Create company</button>
+        </form>
+        <p id="company-form-msg" class="muted"></p>
+      </div>
+      <div class="card">
+        <h2>Companies</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Code</th><th>Name</th><th>Admins</th><th>Subscription</th><th></th></tr></thead>
+            <tbody id="companies-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SIP account of a rider -->
+  <dialog id="sip-dialog">
+    <form method="dialog" id="sip-form" class="grid-form">
+      <h2 id="sip-title">SIP account</h2>
+      <label>Username <input id="sip-user"></label>
+      <label>Password <input id="sip-pass" type="text"></label>
+      <label>Domain / server <input id="sip-domain"></label>
+      <label>Port <input id="sip-port" type="number" value="5060"></label>
+      <div class="row end">
+        <button value="cancel" class="link">Cancel</button>
+        <button value="save" class="primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
