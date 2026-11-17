@@ -62,6 +62,7 @@ class LinphoneSipManager(
     private var confStatsJob: Job? = null
     private var callSessionActive = false
     private var callSessionIncoming = false
+    private var callSessionAnswered = false
     private var activeAccountModel: SipAccount? = null
     private var currentSettings: AppSettings = AppSettings()
 
@@ -462,7 +463,7 @@ class LinphoneSipManager(
                     currentLinphoneCall = null
                     primaryLinphoneCall = null
                     secondaryLinphoneCall = null
-                    emitCallEnded(remoteAddress, remoteDisplayName, duration, wasMissed)
+                    emitCallEnded(remoteAddress, remoteDisplayName, duration, wasMissed, sipCode = call.errorInfo?.protocolCode ?: 0)
 
                     scope.launch {
                         refreshBalanceSoon()
@@ -588,16 +589,27 @@ class LinphoneSipManager(
         if (callSessionActive) return
         callSessionActive = true
         callSessionIncoming = incoming
+        callSessionAnswered = false
         scope.launch { _callEvents.emit(CallEvent.CallStarted(uri, displayName, incoming)) }
     }
 
-    private fun emitCallEnded(uri: String, displayName: String, durationSeconds: Long, wasMissed: Boolean) {
+    private fun emitCallEnded(
+        uri: String,
+        displayName: String,
+        durationSeconds: Long,
+        wasMissed: Boolean,
+        sipCode: Int = 0,
+        endedLocally: Boolean = false
+    ) {
         if (!callSessionActive) return
         callSessionActive = false
-        val incoming = callSessionIncoming
-        scope.launch {
-            _callEvents.emit(CallEvent.CallEnded(uri, displayName, durationSeconds, wasMissed, incoming))
-        }
+        val event = CallEvent.CallEnded(
+            uri, displayName, durationSeconds, wasMissed, callSessionIncoming,
+            answered = callSessionAnswered,
+            sipCode = sipCode,
+            endedLocally = endedLocally && !callSessionAnswered
+        )
+        scope.launch { _callEvents.emit(event) }
     }
 
     /** Re-REGISTER shortly after a call so the balance header shows the post-call balance. */
@@ -1393,7 +1405,7 @@ class LinphoneSipManager(
 
         stopDurationTimer()
         _callState.value = CallState.Disconnected("Call Terminated")
-        emitCallEnded(remoteUri, dispName, duration, wasMissed)
+        emitCallEnded(remoteUri, dispName, duration, wasMissed, endedLocally = true)
 
         scope.launch {
             refreshBalanceSoon()
@@ -1907,6 +1919,7 @@ class LinphoneSipManager(
     }
 
     private fun startDurationTimer() {
+        callSessionAnswered = true
         durationTimerJob?.cancel()
         _callDuration.value = 0L
         durationTimerJob = scope.launch {

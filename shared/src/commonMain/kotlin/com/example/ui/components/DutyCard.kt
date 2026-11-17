@@ -11,10 +11,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LocationOff
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -46,6 +48,7 @@ import kotlinx.coroutines.delay
 fun DutyCard(modifier: Modifier = Modifier) {
     val duty = AppGraph.duty ?: return
     val state by duty.state.collectAsState()
+    val callsOnlyOnDuty by duty.callsOnlyOnDuty.collectAsState()
     if (state is DutyState.Unavailable) return
 
     val toast = rememberToast()
@@ -73,7 +76,8 @@ fun DutyCard(modifier: Modifier = Modifier) {
             } to CallActionGreen
         }
         is DutyState.Problem -> s.message to CallActionRed
-        else -> "Turn on to share your location with your company" to MaterialTheme.colorScheme.onSurfaceVariant
+        else -> (if (callsOnlyOnDuty) "Turn on to make calls and share your location with your company"
+            else "Turn on to share your location with your company") to MaterialTheme.colorScheme.onSurfaceVariant
     }
 
     Row(
@@ -105,4 +109,40 @@ fun DutyCard(modifier: Modifier = Modifier) {
             modifier = Modifier.testTag("duty_switch")
         )
     }
+}
+
+/**
+ * Asked when an off-duty rider calls and the company allows calls only on duty: going on duty
+ * (location permission first) and then [onOnDuty] places the call.
+ */
+@Composable
+fun DutyNeededDialog(onDismiss: () -> Unit, onOnDuty: () -> Unit) {
+    val duty = AppGraph.duty ?: return
+    val toast = rememberToast()
+    val requestPermission = rememberLocationPermissionRequest { granted ->
+        if (granted) {
+            duty.setOnDuty(true)
+            onOnDuty()
+        } else {
+            toast("Allow location to go on duty")
+            onDismiss()
+        }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Go on duty to call") },
+        text = {
+            Text(
+                "Your company allows calls only while you are on duty. On duty, your location " +
+                    "and your calls are shared with your company."
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { requestPermission() }, modifier = Modifier.testTag("btn_go_on_duty")) { Text("Go on duty") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+        modifier = Modifier.testTag("dialog_duty_needed")
+    )
 }

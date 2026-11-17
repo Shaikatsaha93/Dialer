@@ -50,14 +50,54 @@
       }
     },
 
+    // companySettings/{company}: set by the company admin, read by its riders' phones.
+    //   callsOnlyOnDuty (default true): riders can call only while on duty.
+    "companySettings": {
+      "$company": {
+        ".read": "auth != null && (root.child('companyAdmins').child($company).child(auth.uid).val() === true || root.child('members').child($company).child(auth.uid).isNumber())",
+        ".write": "auth != null && root.child('companyAdmins').child($company).child(auth.uid).val() === true",
+        "callsOnlyOnDuty": { ".validate": "newData.isBoolean()" },
+        "$other": { ".validate": false }
+      }
+    },
+
+    // calls/{company}/{uid}/{yyyy-MM-dd}/{call}: the company's call report. Riders only add their
+    // own calls; the company admin reads them and can only delete whole days.
+    "calls": {
+      "$company": {
+        ".read": "auth != null && root.child('companyAdmins').child($company).child(auth.uid).val() === true",
+        "$uid": {
+          "$day": {
+            ".write": "auth != null && root.child('companyAdmins').child($company).child(auth.uid).val() === true && !newData.exists()",
+            "$call": {
+              ".write": "auth != null && auth.uid === $uid && !data.exists() && root.child('members').child($company).child($uid).isNumber() && root.child('members').child($company).child($uid).val() > now",
+              ".validate": "newData.hasChildren(['number', 'dir', 'result', 'start', 'talk', 'onDuty'])",
+              "number": { ".validate": "newData.isString() && newData.val().length <= 40" },
+              "name": { ".validate": "newData.isString() && newData.val().length <= 60" },
+              "dir": { ".validate": "newData.val() === 'in' || newData.val() === 'out'" },
+              "result": { ".validate": "newData.isString() && newData.val().matches(/^(answered|no_answer|busy|declined|cancelled|missed|failed)$/)" },
+              "start": { ".validate": "newData.isNumber() && newData.val() <= now + 60000" },
+              "talk": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 86400" },
+              "onDuty": { ".validate": "newData.isBoolean()" },
+              "code": { ".validate": "newData.isNumber()" },
+              "lat": { ".validate": "newData.isNumber() && newData.val() >= -90 && newData.val() <= 90" },
+              "lng": { ".validate": "newData.isNumber() && newData.val() >= -180 && newData.val() <= 180" },
+              "accuracy": { ".validate": "newData.isNumber()" },
+              "$other": { ".validate": false }
+            }
+          }
+        }
+      }
+    },
+
     // tracks/{company}/{uid}/{yyyy-MM-dd}/{point}: the day's route. Riders only add points;
     // the company admin can delete old days.
     "tracks": {
       "$company": {
         ".read": "auth != null && root.child('companyAdmins').child($company).child(auth.uid).val() === true",
-        ".write": "auth != null && root.child('companyAdmins').child($company).child(auth.uid).val() === true",
         "$uid": {
           "$day": {
+            ".write": "auth != null && root.child('companyAdmins').child($company).child(auth.uid).val() === true && !newData.exists()",
             "$point": {
               ".write": "auth != null && auth.uid === $uid && !data.exists() && root.child('members').child($company).child($uid).isNumber() && root.child('members').child($company).child($uid).val() > now",
               ".validate": "newData.hasChildren(['lat', 'lng', 't'])",

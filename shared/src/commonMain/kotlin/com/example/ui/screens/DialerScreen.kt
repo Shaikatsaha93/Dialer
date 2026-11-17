@@ -111,8 +111,7 @@ fun DialerScreen(
     val clipboard = LocalClipboardManager.current
 
     fun call(number: String) {
-        viewModel.initiateCall(number)
-        onNavigateToActiveCall()
+        if (viewModel.initiateCall(number)) onNavigateToActiveCall()
     }
     val onCall: () -> Unit = {
         val redial = lastDialed

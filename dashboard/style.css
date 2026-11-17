@@ -119,3 +119,18 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
 .route-pin.start { background: var(--green); border-radius: 50%; }
 .route-pin.end { background: #1c1c1e; border-radius: 50%; }
 .route-pin.stop { background: var(--orange); }
+
+/* Calls */
+.setting { margin-top: 8px; flex-wrap: wrap; color: var(--text); }
+.filters { margin-bottom: 10px; align-items: flex-end; }
+.summary.wide { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); margin-bottom: 10px; }
+.result { font-weight: 600; }
+.result.answered { color: var(--green); }
+.result.no_answer, .result.busy, .result.missed { color: var(--orange); }
+.result.declined, .result.cancelled, .result.failed { color: var(--red); }
+.report-row { margin-top: 10px; }
+td .address { font-size: 12px; }
+.call-pin { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #fff; color: #fff; font-size: 12px; display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 3px rgba(0,0,0,.4); background: var(--red); }
+.call-pin.answered { background: var(--green); }
+.dir { font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 6px; background: var(--bg); color: var(--muted); }
+.dir.in { color: var(--primary); }

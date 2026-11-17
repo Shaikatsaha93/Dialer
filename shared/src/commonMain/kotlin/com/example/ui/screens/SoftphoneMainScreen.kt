@@ -91,6 +91,20 @@ fun SoftphoneMainScreen(
 
     RequestStartupPermissions(onContactsGranted = { viewModel.loadDeviceContacts() })
 
+    // A delivery rider called while off duty, and the company allows calls only on duty
+    val dutyNeededFor by viewModel.dutyNeededFor.collectAsStateWithLifecycle()
+    dutyNeededFor?.let { number ->
+        com.example.ui.components.DutyNeededDialog(
+            onDismiss = viewModel::dismissDutyNeeded,
+            onOnDuty = {
+                viewModel.dismissDutyNeeded()
+                if (viewModel.initiateCall(number)) {
+                    navController.navigate(Screen.ActiveCall.route) { launchSingleTop = true }
+                }
+            }
+        )
+    }
+
     // Auto-navigate to ActiveCall screen when a call becomes incoming or connected
     LaunchedEffect(callState) {
         if (callState !is CallState.Idle && callState !is CallState.Disconnected) {
@@ -335,8 +349,9 @@ private fun NavHostContent(
                 onBack = { navController.popBackStack() },
                 onCall = { number ->
                     viewModel.setDialerInput(number)
-                    viewModel.initiateCall()
-                    navController.navigate(Screen.ActiveCall.route) { launchSingleTop = true }
+                    if (viewModel.initiateCall()) {
+                        navController.navigate(Screen.ActiveCall.route) { launchSingleTop = true }
+                    }
                 }
             )
         }

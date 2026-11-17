@@ -309,7 +309,7 @@ Delivery companies use the app for their riders and follow them on a live map. E
 | Who | Where | What |
 |---|---|---|
 | Main admin (`ADMIN_EMAIL`) | Dashboard → **Companies** | Creates a company (its **code**, e.g. `PATHAO7`, name and subscription) and the company admin's email and password. Extends a company's subscription. |
-| Company admin | Dashboard → **Riders** and **Map** | Approves, renews, blocks and deletes the company's riders, sets their SIP accounts, sees them live on the map, and gets each rider's route reports (see below). |
+| Company admin | Dashboard → **Map**, **Riders** and **Calls** | Approves, renews, blocks and deletes the company's riders, sets their SIP accounts, sees them live on the map, and gets each rider's route and call reports (see below). |
 | Rider | The Android app | Types the company code in the access request. After approval, switches **On duty** on the dialer screen to share the location, and off after work. |
 
 The dashboard is a web page: **https://shaikatsaha93.github.io/Dialer/** (published from [`dashboard/`](dashboard/) by `.github/workflows/dashboard.yml`). It works on any computer or phone browser; the map is OpenStreetMap, no API key needed.
@@ -319,6 +319,7 @@ The dashboard is a web page: **https://shaikatsaha93.github.io/Dialer/** (publis
 - The access request has an optional **Company code** field. A wrong code shows "Company code … not found". Without a code the request goes to the main admin as before.
 - After approval the dialer shows an **On duty / Off duty** card. Going on duty asks for the location permission ("While using the app" is enough) and shows a permanent notification "On duty · Sharing your location", with a **Go off duty** button.
 - While on duty the phone sends its position about every 15 seconds when moving (every 2 minutes when standing), plus battery level and speed. Offline positions are kept and sent when the network is back.
+- Each call (number, result, talk time, on or off duty, and the location while on duty) goes to the company's call report. If the company allows calls only on duty, calling while off duty shows **Go on duty to call**.
 - Blocked, expired, deleted, or the company's subscription ended: sharing stops and the app locks.
 - After a reboot, sharing resumes the next time the rider opens Dialer (Android only lets a location service start from the open app).
 - OPPO, Xiaomi, Vivo and similar phones can stop apps in the background: set Dialer's battery usage to **Unrestricted**.
@@ -334,10 +335,26 @@ On the **Map**, click a rider (or **Show route** in its popup) and pick a day in
 
 The phone adds a route point every 30 m moved, or every 5 minutes while standing.
 
+The route also shows the rider's calls of that day (☎ pins: green answered, red not answered; hover for the number and result), each stop lists the calls made there, and the route CSV puts the calls in the timeline.
+
+### Calls: who called which number, from where, and how it went
+
+Every call of a company's rider (outgoing and incoming) is sent to the company when it ends. Dashboard → **Calls**:
+
+- Pick a **day**, and filter by **rider**, **result** (answered / not answered) and **direction**.
+- Summary: calls, answered, not answered, talk time, outgoing / incoming, calls made off duty.
+- Each call: time, rider, number (and contact name), result (**Answered**, **No answer**, **Busy**, **Declined**, **Cancelled**, **Missed**, **Failed**, with the SIP code), talk time, on or off duty, and where the rider was (street address, **Show on map** opens the rider's route there).
+- **Download CSV** (this day, 7 or 30 days, with the filters applied) for Excel.
+- Updates live while open. Calls are kept 90 days.
+
+The location of a call is the rider's latest position, so a call has one only while the rider is on duty (off duty nothing about the location is shared).
+
+**Calls only on duty** (Dashboard → **Riders**, on by default): an off-duty rider who calls is asked to **Go on duty** first; one tap turns duty on and places the call. Incoming calls still ring off duty (and are marked "off duty" in the report). Emergency numbers (999, 112, 911) are never held back. Users without a company code are not affected.
+
 ### Where the data is
 
 - Firestore `companies/{code}`: name, `adminUids`, `adminEmails`, `expiresAt`. Rider records stay in `devices/{uid}`, with `companyId` = the code.
-- Realtime Database (free for frequent small writes): `live/{code}/{uid}` (latest position), `tracks/{code}/{uid}/{yyyy-MM-dd}` (the day's route, kept 30 days), and two lists the dashboard keeps in step with Firestore because Realtime Database rules cannot read Firestore: `companyAdmins/{code}/{uid}` and `members/{code}/{uid}` (until when the rider may share).
+- Realtime Database (free for frequent small writes): `live/{code}/{uid}` (latest position), `tracks/{code}/{uid}/{yyyy-MM-dd}` (the day's route, kept 30 days), and two lists the dashboard keeps in step with Firestore because Realtime Database rules cannot read Firestore: `companyAdmins/{code}/{uid}` and `members/{code}/{uid}` (until when the rider may share). Also `calls/{code}/{uid}/{yyyy-MM-dd}/{id}` (the call report) and `companySettings/{code}` (`callsOnlyOnDuty`).
 - Approving, renewing, blocking or deleting a company's rider (in the dashboard, or in the app's Admin tab) also updates `members/{code}/{uid}`; without it the rider's phone may not write its location.
 - Who may read and write what is enforced by [`firestore.rules`](firestore.rules) and [`database.rules.json`](database.rules.json), not by the apps.
 

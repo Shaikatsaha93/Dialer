@@ -261,11 +261,28 @@ class SoftphoneViewModel(
         _dialerInput.value = value
     }
 
-    fun initiateCall(destination: String? = null) {
+    /**
+     * Calls [destination] (or the dial pad's number). Returns false when no call was started:
+     * nothing to call, or a delivery rider off duty whose company allows calls only on duty
+     * ([dutyNeededFor] then asks the rider to go on duty).
+     */
+    fun initiateCall(destination: String? = null): Boolean {
         val target = destination ?: _dialerInput.value
-        if (target.isNotBlank()) {
-            sipManager.makeCall(target)
+        if (target.isBlank()) return false
+        if (AppGraph.duty?.callNeedsDuty(target) == true) {
+            _dutyNeededFor.value = target
+            return false
         }
+        sipManager.makeCall(target)
+        return true
+    }
+
+    private val _dutyNeededFor = MutableStateFlow<String?>(null)
+    /** A number held back until the rider goes on duty (see [initiateCall]) */
+    val dutyNeededFor: StateFlow<String?> = _dutyNeededFor.asStateFlow()
+
+    fun dismissDutyNeeded() {
+        _dutyNeededFor.value = null
     }
 
     fun acceptCall() {

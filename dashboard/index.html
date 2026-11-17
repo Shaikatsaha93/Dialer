@@ -30,6 +30,7 @@
       <nav class="tabs">
         <button data-tab="map" class="tab active">Map</button>
         <button data-tab="riders" class="tab">Riders <span id="pending-badge" class="badge hidden"></span></button>
+        <button data-tab="calls" class="tab">Calls</button>
         <button data-tab="companies" class="tab super-only hidden">Companies</button>
       </nav>
       <div class="user">
@@ -91,11 +92,56 @@
           <h2>Riders</h2>
           <p class="muted">Riders join by typing your company code <b id="company-code"></b> in the app's access request.</p>
         </div>
+        <label class="inline setting">
+          <input id="calls-only-duty" type="checkbox">
+          Riders can call only while on duty <span class="muted">(off duty, the app asks them to go on duty first; emergency numbers always work)</span>
+        </label>
         <div class="table-wrap">
           <table>
             <thead><tr><th>Name</th><th>Phone</th><th>Device</th><th>Status</th><th>SIP</th><th></th></tr></thead>
             <tbody id="riders-body"></tbody>
           </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Calls of the riders: number, result, talk time and where the rider was -->
+    <div id="tab-calls" class="tab-page hidden">
+      <div class="card">
+        <h2>Calls</h2>
+        <div class="row filters">
+          <label>Day <input id="calls-day" type="date"></label>
+          <label>Rider <select id="calls-rider"><option value="">All riders</option></select></label>
+          <label>Result
+            <select id="calls-result">
+              <option value="">All</option>
+              <option value="answered">Answered</option>
+              <option value="not">Not answered</option>
+            </select>
+          </label>
+          <label>Direction
+            <select id="calls-dir">
+              <option value="">Both</option>
+              <option value="out">Outgoing</option>
+              <option value="in">Incoming</option>
+            </select>
+          </label>
+        </div>
+        <div id="calls-summary" class="summary wide"></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Time</th><th>Rider</th><th>Number</th><th>Result</th><th>Talk</th><th>Duty</th><th>Where</th></tr></thead>
+            <tbody id="calls-body"></tbody>
+          </table>
+        </div>
+        <div class="row report-row">
+          <select id="calls-range" aria-label="Report period">
+            <option value="1">This day</option>
+            <option value="7">7 days up to this day</option>
+            <option value="30">30 days up to this day</option>
+          </select>
+          <button id="calls-download">Download CSV</button>
+          <span id="calls-msg" class="muted"></span>
         </div>
       </div>
     </div>

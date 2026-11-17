@@ -225,8 +225,11 @@ function selectCompany(code) {
     state.riders = new Map(snap.docs.map((d) => [d.id, d.data()]));
     renderRiders();
     renderMap();
+    if (watchedCallKey) watchCalls();
   }, (err) => showBanner('Cannot load riders: ' + err.message)));
+  watchCompanySettings(code);
   firstFit = true;
+  if (!$('tab-calls').classList.contains('hidden')) watchCalls();
 }
 
 function stopCompany() {
@@ -235,6 +238,7 @@ function stopCompany() {
   state.live = {};
   state.riders = new Map();
   state.selectedRider = null;
+  stopCalls();
   clearRoute();
   if (map) { markers.forEach((m) => m.remove()); markers.clear(); }
 }
@@ -248,6 +252,7 @@ function switchTab(name) {
   document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.tab-page').forEach((p) => p.classList.toggle('hidden', p.id !== `tab-${name}`));
   if (name === 'map' && map) setTimeout(() => map.invalidateSize(), 0);
+  if (name === 'calls') watchCalls();
 }
 document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => switchTab(t.dataset.tab)));
 
@@ -459,6 +464,7 @@ function showRoute() {
   if (!uid || !day) return;
   followEnd = true;
   $('route-info').textContent = 'Loading…';
+  watchRouteCalls(uid, day);
   routeRef = ref(db, `tracks/${state.company}/${uid}/${day}`);
   onValue(routeRef, (snap) => {
     const keepIndex = followEnd || !route ? null : +$('route-slider').value;
@@ -534,21 +540,25 @@ function renderSummary() {
   const stopped = stops.reduce((s, x) => s + (x.to - x.from), 0);
   const silent = gaps.reduce((s, g) => s + (g.to - g.from), 0);
   const stat = (value, label) => el('div', { class: 'stat' }, el('b', {}, value), el('span', {}, label));
-  $('route-summary').replaceChildren(
+  const stats = [
     stat(`${km.toFixed(1)} km`, 'distance'),
     stat(`${timeText(first)}–${timeText(last)}`, durationText(last - first)),
     stat(String(stops.length), `${stops.length === 1 ? 'stop' : 'stops'} · ${durationText(stopped)}`),
-    stat(topSpeed ? `${topSpeed} km/h` : '–', 'top speed'),
-    silent ? stat(durationText(silent), 'no location (off duty or no signal)') : null
-  );
+    stat(topSpeed ? `${topSpeed} km/h` : '–', 'top speed')
+  ];
+  if (silent) stats.push(stat(durationText(silent), 'no location (off duty or no signal)'));
+  // replaceChildren() would print a null as the text "null"
+  $('route-summary').replaceChildren(...stats);
 }
 
 function renderStops() {
   $('route-stops').replaceChildren(...route.stops.map((s, n) => {
     const address = el('div', { class: 'address muted' }, '…');
     lookupAddress(s.lat, s.lng).then((text) => { address.textContent = text || `${s.lat.toFixed(5)}, ${s.lng.toFixed(5)}`; });
+    const calls = callsDuring(s.from, s.to);
     return el('li', { onclick: () => focusStop(n) },
-      el('div', {}, el('b', {}, `${timeText(s.from)}–${timeText(s.to)}`), ` · ${durationText(s.to - s.from)}`),
+      el('div', {}, el('b', {}, `${timeText(s.from)}–${timeText(s.to)}`), ` · ${durationText(s.to - s.from)}`,
+        calls.length ? ` · ☎ ${calls.length} ${calls.length === 1 ? 'call' : 'calls'}` : ''),
       address);
   }));
 }
@@ -598,6 +608,7 @@ function mapsLink(lat, lng) {
 function clearRoute(hideBox = true) {
   if (routeRef) { off(routeRef); routeRef = null; }
   if (routeLayer) routeLayer.clearLayers();
+  stopRouteCalls();
   playhead = null;
   route = null;
   $('route-summary').classList.add('hidden');
@@ -690,7 +701,9 @@ async function downloadReport() {
     for (const day of days) {
       const snap = await get(ref(db, `tracks/${state.company}/${uid}/${day}`));
       const points = trackPoints(snap.val());
-      if (points.length) loaded.push({ day, ...analyseRoute(points) });
+      const calls = callList((await get(ref(db, `calls/${state.company}/${uid}/${day}`))).val(), uid).sort((a, b) => a.start - b.start);
+      if (points.length) loaded.push({ day, calls, ...analyseRoute(points) });
+      else if (calls.length) loaded.push({ day, calls, points: [], stops: [], gaps: [], km: 0, topSpeed: 0 });
     }
     if (!loaded.length) { msg.textContent = 'No route in this period.'; return; }
 
@@ -705,18 +718,32 @@ async function downloadReport() {
     const lines = [
       ['Rider', name], ['Phone', r?.phone || state.live[uid]?.phone || ''], ['Company', state.company],
       ['Period', days.length > 1 ? `${days[0]} to ${days[days.length - 1]}` : days[0]], [],
-      ['Date', 'Distance (km)', 'Start', 'End', 'Stops', 'Stopped (min)', 'No location (min)', 'Top speed (km/h)']
+      ['Date', 'Distance (km)', 'Start', 'End', 'Stops', 'Stopped (min)', 'No location (min)', 'Top speed (km/h)', 'Calls', 'Answered']
     ];
     for (const d of loaded) {
-      lines.push([d.day, d.km.toFixed(1), timeText(d.points[0].t), timeText(d.points[d.points.length - 1].t), d.stops.length,
+      const has = d.points.length > 0;
+      lines.push([d.day, d.km.toFixed(1), has ? timeText(d.points[0].t) : '', has ? timeText(d.points[d.points.length - 1].t) : '', d.stops.length,
         Math.round(d.stops.reduce((s, x) => s + x.to - x.from, 0) / 60000),
-        Math.round(d.gaps.reduce((s, g) => s + g.to - g.from, 0) / 60000), d.topSpeed || '']);
+        Math.round(d.gaps.reduce((s, g) => s + g.to - g.from, 0) / 60000), d.topSpeed || '',
+        d.calls.length, d.calls.filter((c) => c.result === 'answered').length]);
     }
     lines.push([], ['Date', 'From', 'To', 'Minutes', 'What', 'Speed (km/h)', 'Latitude', 'Longitude', 'Address', 'Map']);
     for (const d of loaded) {
+      // Calls go between the route lines at their time
+      const pending = [...d.calls];
+      const flushCalls = (until) => {
+        while (pending.length && pending[0].start <= until) {
+          const c = pending.shift();
+          const hasFix = typeof c.lat === 'number' && typeof c.lng === 'number';
+          lines.push([d.day, timeText(c.start), '', c.talk ? Math.round(c.talk / 6) / 10 : '',
+            `Call ${c.dir === 'in' ? 'from' : 'to'} ${c.number}${c.name ? ' (' + c.name + ')' : ''}: ${RESULT_TEXT[c.result] || c.result}${c.talk ? ' ' + talkText(c.talk) : ''}${c.onDuty ? '' : ' (off duty)'}`,
+            '', hasFix ? c.lat.toFixed(6) : '', hasFix ? c.lng.toFixed(6) : '', '', hasFix ? mapsLink(c.lat, c.lng) : '']);
+        }
+      };
       const stopAt = new Map(d.stops.map((s, n) => [s.first, { ...s, n }]));
       const gapAfter = new Map(d.gaps.map((g) => [g.after, g]));
       for (let i = 0; i < d.points.length; i++) {
+        flushCalls(d.points[i].t);
         const s = stopAt.get(i);
         if (s) {
           lines.push([d.day, timeText(s.from), timeText(s.to), Math.round((s.to - s.from) / 60000), `Stop ${s.n + 1}`, '',
@@ -729,15 +756,10 @@ async function downloadReport() {
         const g = gapAfter.get(i);
         if (g) lines.push([d.day, timeText(g.from), timeText(g.to), Math.round((g.to - g.from) / 60000), 'No location (off duty or no signal)']);
       }
+      flushCalls(Infinity);
     }
-    // BOM so Excel reads Bangla names and addresses as UTF-8
-    const csv = '﻿' + lines.map((row) => row.map(csvCell).join(',')).join('\r\n');
     const file = `route_${name.replace(/[^\p{L}\p{N}]+/gu, '_').replace(/^_+|_+$/g, '') || 'rider'}_${days[0]}${days.length > 1 ? '_to_' + days[days.length - 1] : ''}.csv`;
-    const link = el('a', { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' })), download: file });
-    document.body.append(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(link.href), 10000);
+    saveCsv(lines, file);
     msg.textContent = `Downloaded ${file}`;
   } catch (err) {
     msg.textContent = 'Cannot make the report: ' + err.message;
@@ -755,9 +777,266 @@ async function pruneOldDays(uid) {
     const old = await get(dbQuery(ref(db, `tracks/${state.company}/${uid}`), orderByKey(), endAt(cutoff)));
     const days = Object.keys(old.val() || {}).filter((d) => d < cutoff);
     await Promise.all(days.map((d) => remove(ref(db, `tracks/${state.company}/${uid}/${d}`))));
+    const callCutoff = dayKey(new Date(Date.now() - KEEP_CALL_DAYS * DAY));
+    const oldCalls = await get(dbQuery(ref(db, `calls/${state.company}/${uid}`), orderByKey(), endAt(callCutoff)));
+    const callDays = Object.keys(oldCalls.val() || {}).filter((d) => d < callCutoff);
+    await Promise.all(callDays.map((d) => remove(ref(db, `calls/${state.company}/${uid}/${d}`))));
   } catch (err) {
     console.warn('Prune failed', err);
   }
+}
+
+// ---------- calls ----------
+
+// calls/{company}/{uid}/{yyyy-MM-dd}/{id}: number, dir (in/out), result, start, talk (s), onDuty,
+// and lat/lng when the rider was on duty. Written by the app at the end of each call.
+const KEEP_CALL_DAYS = 90;
+const RESULT_TEXT = {
+  answered: 'Answered', no_answer: 'No answer', busy: 'Busy', declined: 'Declined',
+  cancelled: 'Cancelled', missed: 'Missed', failed: 'Failed'
+};
+const callsByRider = new Map();   // uid -> calls of the day shown in the Calls tab
+let callRefs = [];
+let watchedCallKey = '';
+
+function talkText(s) {
+  if (!s) return '–';
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+function callList(val, uid) {
+  return Object.entries(val || {})
+    .map(([id, c]) => ({ id, uid, ...c }))
+    .filter((c) => typeof c.start === 'number');
+}
+
+function callText(c) {
+  const who = c.name ? `${c.number} (${c.name})` : c.number;
+  return `${timeText(c.start)} · ${c.dir === 'in' ? 'Incoming from' : 'Outgoing to'} ${who} · ${RESULT_TEXT[c.result] || c.result}` +
+    (c.talk ? ` ${talkText(c.talk)}` : '');
+}
+
+function watchCalls() {
+  if (!state.company) return;
+  if (!$('calls-day').value) $('calls-day').value = dayKey(new Date());
+  const day = $('calls-day').value;
+  const key = `${state.company}/${day}/${[...state.riders.keys()].sort().join(',')}`;
+  renderCallRiderOptions();
+  if (key === watchedCallKey) return;
+  stopCalls();
+  watchedCallKey = key;
+  $('calls-msg').textContent = '';
+  for (const uid of state.riders.keys()) {
+    const r = ref(db, `calls/${state.company}/${uid}/${day}`);
+    onValue(r, (snap) => {
+      callsByRider.set(uid, callList(snap.val(), uid));
+      renderCalls();
+    }, (err) => { $('calls-msg').textContent = 'Cannot load calls: ' + err.message; });
+    callRefs.push(r);
+  }
+  renderCalls();
+}
+
+function stopCalls() {
+  callRefs.forEach((r) => off(r));
+  callRefs = [];
+  callsByRider.clear();
+  watchedCallKey = '';
+}
+
+function renderCallRiderOptions() {
+  const select = $('calls-rider');
+  const current = select.value;
+  select.replaceChildren(el('option', { value: '' }, 'All riders'),
+    ...[...state.riders.entries()]
+      .sort((a, b) => (a[1].name || '').localeCompare(b[1].name || ''))
+      .map(([uid, r]) => el('option', { value: uid }, r.name || uid.slice(0, 8))));
+  select.value = state.riders.has(current) ? current : '';
+}
+
+function callFilter(c) {
+  const rider = $('calls-rider').value;
+  const result = $('calls-result').value;
+  const dir = $('calls-dir').value;
+  return (!rider || c.uid === rider) &&
+    (!result || (result === 'answered' ? c.result === 'answered' : c.result !== 'answered')) &&
+    (!dir || c.dir === dir);
+}
+
+function renderCalls() {
+  const calls = [...callsByRider.values()].flat().filter(callFilter).sort((a, b) => b.start - a.start);
+  const answered = calls.filter((c) => c.result === 'answered');
+  const stat = (value, label) => el('div', { class: 'stat' }, el('b', {}, value), el('span', {}, label));
+  $('calls-summary').replaceChildren(
+    stat(String(calls.length), 'calls'),
+    stat(String(answered.length), 'answered'),
+    stat(String(calls.length - answered.length), 'not answered'),
+    stat(durationText(answered.reduce((s, c) => s + (c.talk || 0), 0) * 1000), 'talk time'),
+    stat(`${calls.filter((c) => c.dir === 'out').length} / ${calls.filter((c) => c.dir === 'in').length}`, 'outgoing / incoming'),
+    stat(String(calls.filter((c) => !c.onDuty).length), 'off duty')
+  );
+  const body = $('calls-body');
+  if (!calls.length) {
+    body.replaceChildren(el('tr', {}, el('td', { colspan: 7, class: 'muted' }, 'No calls on this day.')));
+    return;
+  }
+  body.replaceChildren(...calls.map((c) => {
+    const where = el('td', {});
+    if (typeof c.lat === 'number' && typeof c.lng === 'number') {
+      const address = el('div', { class: 'address muted' }, '…');
+      lookupAddress(c.lat, c.lng).then((text) => { address.textContent = text || `${c.lat.toFixed(5)}, ${c.lng.toFixed(5)}`; });
+      where.append(el('button', { class: 'link', onclick: () => showCallOnMap(c) }, 'Show on map'), address);
+    } else {
+      where.append(el('span', { class: 'muted' }, c.onDuty ? 'No GPS fix' : '–'));
+    }
+    return el('tr', {},
+      el('td', {}, timeText(c.start)),
+      el('td', {}, riderName(c.uid, state.live[c.uid])),
+      el('td', {}, el('span', { class: `dir ${c.dir}` }, c.dir === 'in' ? 'In' : 'Out'), ' ',
+        el('a', { href: `tel:${c.number}` }, c.number), c.name ? el('div', { class: 'muted' }, c.name) : null),
+      el('td', {}, el('span', { class: `result ${c.result}` }, RESULT_TEXT[c.result] || c.result), c.code ? el('span', { class: 'muted' }, ` (${c.code})`) : null),
+      el('td', {}, talkText(c.talk)),
+      el('td', {}, c.onDuty ? 'On' : el('span', { class: 'muted' }, 'Off')),
+      where
+    );
+  }));
+}
+
+/** The Map tab with the rider's route of that day, centred on the call */
+function showCallOnMap(c) {
+  switchTab('map');
+  $('route-day').value = dayKey(new Date(c.start));
+  selectRider(c.uid);
+  map.setView([c.lat, c.lng], 17);
+}
+
+['calls-day'].forEach((id) => $(id).addEventListener('change', watchCalls));
+['calls-rider', 'calls-result', 'calls-dir'].forEach((id) => $(id).addEventListener('change', renderCalls));
+
+// Call pins on the route of the rider shown on the map
+let routeCallsRef = null;
+let routeCallLayer = null;
+let routeCalls = [];
+
+function watchRouteCalls(uid, day) {
+  stopRouteCalls();
+  routeCallsRef = ref(db, `calls/${state.company}/${uid}/${day}`);
+  onValue(routeCallsRef, (snap) => {
+    routeCalls = callList(snap.val(), uid).sort((a, b) => a.start - b.start);
+    drawRouteCalls();
+    if (route) renderStops();
+  }, (err) => console.warn('Calls not loaded', err));
+}
+
+function stopRouteCalls() {
+  if (routeCallsRef) { off(routeCallsRef); routeCallsRef = null; }
+  routeCalls = [];
+  if (routeCallLayer) routeCallLayer.clearLayers();
+}
+
+function drawRouteCalls() {
+  ensureMap();
+  if (!routeCallLayer) routeCallLayer = L.layerGroup().addTo(map);
+  routeCallLayer.clearLayers();
+  for (const c of routeCalls) {
+    if (typeof c.lat !== 'number' || typeof c.lng !== 'number') continue;
+    L.marker([c.lat, c.lng], {
+      icon: L.divIcon({ className: '', html: `<div class="call-pin ${c.result === 'answered' ? 'answered' : ''}">☎</div>`, iconSize: [22, 22], iconAnchor: [11, 11] }),
+      zIndexOffset: 400
+    }).bindTooltip(el('span', {}, callText(c)), { direction: 'top' }).addTo(routeCallLayer);
+  }
+}
+
+function callsDuring(from, to) {
+  return routeCalls.filter((c) => c.start >= from && c.start <= to + 60000);
+}
+
+// Company setting: riders call only while on duty (companySettings/{company}/callsOnlyOnDuty)
+function watchCompanySettings(code) {
+  const settingRef = ref(db, `companySettings/${code}/callsOnlyOnDuty`);
+  onValue(settingRef, (snap) => { $('calls-only-duty').checked = snap.val() !== false; },
+    (err) => console.warn('Settings not loaded', err));
+  state.unsub.push(() => off(settingRef));
+}
+
+$('calls-only-duty').addEventListener('change', async (e) => {
+  const on = e.target.checked;
+  try {
+    await set(ref(db, `companySettings/${state.company}/callsOnlyOnDuty`), on);
+  } catch (err) {
+    e.target.checked = !on;
+    alert('Could not save: ' + err.message);
+  }
+});
+
+async function downloadCallsReport() {
+  if (!state.company) return;
+  const endKey = $('calls-day').value || dayKey(new Date());
+  const count = +$('calls-range').value;
+  const msg = $('calls-msg');
+  const button = $('calls-download');
+  const days = [];
+  for (let k = count - 1; k >= 0; k--) {
+    const d = parseDay(endKey);
+    d.setDate(d.getDate() - k);
+    days.push(dayKey(d));
+  }
+  button.disabled = true;
+  try {
+    msg.textContent = 'Loading calls…';
+    const rider = $('calls-rider').value;
+    const uids = rider ? [rider] : [...state.riders.keys()];
+    const calls = [];
+    for (const uid of uids) {
+      for (const day of days) {
+        const snap = await get(ref(db, `calls/${state.company}/${uid}/${day}`));
+        calls.push(...callList(snap.val(), uid).map((c) => ({ ...c, day })));
+      }
+    }
+    const shown = calls.filter(callFilter).sort((a, b) => a.start - b.start);
+    if (!shown.length) { msg.textContent = 'No calls in this period.'; return; }
+    // Street addresses (one request per second): up to MAX_LOOKUPS places, the rest get a map link
+    const MAX_LOOKUPS = 150;
+    const located = shown.filter((c) => typeof c.lat === 'number' && typeof c.lng === 'number');
+    for (let n = 0; n < located.length && n < MAX_LOOKUPS; n++) {
+      msg.textContent = `Looking up addresses ${n + 1} of ${Math.min(located.length, MAX_LOOKUPS)}…`;
+      located[n].address = await lookupAddress(located[n].lat, located[n].lng);
+    }
+    const lines = [
+      ['Company', state.company],
+      ['Period', days.length > 1 ? `${days[0]} to ${days[days.length - 1]}` : days[0]],
+      ['Calls', shown.length, 'Answered', shown.filter((c) => c.result === 'answered').length],
+      [],
+      ['Date', 'Time', 'Rider', 'Rider phone', 'Direction', 'Number', 'Name', 'Result', 'SIP code', 'Talk (m:ss)', 'Talk (s)', 'On duty', 'Latitude', 'Longitude', 'Address', 'Map']
+    ];
+    for (const c of shown) {
+      const r = state.riders.get(c.uid);
+      const hasFix = typeof c.lat === 'number' && typeof c.lng === 'number';
+      lines.push([c.day, timeText(c.start), riderName(c.uid, state.live[c.uid]), r?.phone || '',
+        c.dir === 'in' ? 'Incoming' : 'Outgoing', c.number, c.name || '', RESULT_TEXT[c.result] || c.result, c.code || '',
+        talkText(c.talk), c.talk || 0, c.onDuty ? 'Yes' : 'No',
+        hasFix ? c.lat.toFixed(6) : '', hasFix ? c.lng.toFixed(6) : '', c.address || '', hasFix ? mapsLink(c.lat, c.lng) : '']);
+    }
+    const file = `calls_${state.company}_${days[0]}${days.length > 1 ? '_to_' + days[days.length - 1] : ''}.csv`;
+    saveCsv(lines, file);
+    msg.textContent = `Downloaded ${file}` + (located.length > MAX_LOOKUPS ? ` (addresses for the first ${MAX_LOOKUPS} places)` : '');
+  } catch (err) {
+    msg.textContent = 'Cannot make the report: ' + err.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+$('calls-download').addEventListener('click', downloadCallsReport);
+
+/** Saves [lines] as a CSV file Excel opens (BOM so Bangla text reads as UTF-8) */
+function saveCsv(lines, file) {
+  const csv = '\ufeff' + lines.map((row) => row.map(csvCell).join(',')).join('\r\n');
+  const link = el('a', { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' })), download: file });
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(link.href), 10000);
 }
 
 // ---------- riders ----------

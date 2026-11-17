@@ -65,6 +65,10 @@ interface DutyService {
     val state: StateFlow<DutyState>
     /** Call with true only after the location permission was granted. */
     fun setOnDuty(on: Boolean)
+    /** The rider's company allows calls only while on duty (a setting on the dashboard). */
+    val callsOnlyOnDuty: StateFlow<Boolean>
+    /** True when calling [number] has to wait until the rider goes on duty. */
+    fun callNeedsDuty(number: String): Boolean
 }
 
 enum class DeviceStatus { PENDING, ACTIVE, EXPIRED, DISABLED }

@@ -4,13 +4,19 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.location.Location
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.example.data.repository.DutyService
 import com.example.data.repository.DutyState
 import com.example.data.repository.LicenseManager
+import com.example.sip.isEmergencyNumber
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.database.DataSnapshot
+import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.FirebaseDatabase
+import com.google.firebase.database.Query
+import com.google.firebase.database.ValueEventListener
 import com.google.firebase.database.ServerValue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -57,6 +63,30 @@ class DutyManager(
 
     val rider get() = license.rider.value
 
+    /** The last fix the service received (for the location of a call), null while off duty. */
+    @Volatile
+    internal var lastFix: Location? = null
+
+    private val _callsOnlyOnDuty = MutableStateFlow(true)
+    override val callsOnlyOnDuty: StateFlow<Boolean> = _callsOnlyOnDuty
+
+    private var settingsQuery: Query? = null
+    private val settingsListener = object : ValueEventListener {
+        override fun onDataChange(snapshot: DataSnapshot) {
+            // Not set by the company admin: on (the default)
+            _callsOnlyOnDuty.value = snapshot.getValue(Boolean::class.java) != false
+        }
+
+        override fun onCancelled(error: DatabaseError) {
+            Log.d(TAG, "Company settings not readable: ${error.message}")
+        }
+    }
+
+    override fun callNeedsDuty(number: String): Boolean =
+        license.rider.value != null && _callsOnlyOnDuty.value && !onDuty.value && !isEmergencyNumber(number)
+
+    val isOnDuty get() = onDuty.value
+
     init {
         try {
             // Locations taken offline are kept on the phone and sent when the network is back
@@ -68,6 +98,7 @@ class DutyManager(
         // known only now after the app started: carry on if the rider was on duty.
         scope.launch {
             license.rider.collect { rider ->
+                watchCompanySettings(rider?.companyId)
                 if (rider == null) {
                     context.stopService(Intent(context, LocationService::class.java))
                 } else if (onDuty.value) {
@@ -84,7 +115,19 @@ class DutyManager(
             startService()
         } else {
             context.stopService(Intent(context, LocationService::class.java))
+            lastFix = null
             markOffDuty()
+        }
+    }
+
+    /** companySettings/{company}/callsOnlyOnDuty, set by the company admin on the dashboard */
+    private fun watchCompanySettings(companyId: String?) {
+        settingsQuery?.removeEventListener(settingsListener)
+        settingsQuery = null
+        _callsOnlyOnDuty.value = true
+        if (companyId == null) return
+        settingsQuery = FirebaseDatabase.getInstance().getReference("companySettings/$companyId/callsOnlyOnDuty").also {
+            it.addValueEventListener(settingsListener)
         }
     }
 

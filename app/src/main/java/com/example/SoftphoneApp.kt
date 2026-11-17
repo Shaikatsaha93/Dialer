@@ -58,6 +58,7 @@ class SoftphoneApp : Application() {
     lateinit var chatRepository: ChatRepository
         private set
     lateinit var dutyManager: com.example.location.DutyManager
+    private lateinit var callReporter: com.example.location.CallReporter
         private set
 
     override fun onCreate() {
@@ -81,6 +82,7 @@ class SoftphoneApp : Application() {
         licenseManager.start()
         adminManager = AdminManager(this)
         dutyManager = com.example.location.DutyManager(this, licenseManager)
+        callReporter = com.example.location.CallReporter(dutyManager)
         chatRepository = ChatRepository(database.chatDao(), sipManager, contactsRepository, AndroidChatNotifier(this), applicationScope)
         chatRepository.start()
 
@@ -165,6 +167,7 @@ class SoftphoneApp : Application() {
             sipManager.callEvents.collect { event ->
                 when (event) {
                     is CallEvent.CallStarted -> {
+                        callReporter.onCallStarted()
                         startServiceSafely { SipForegroundService.startService(this@SoftphoneApp) }
                         if (event.isIncoming && settingsRepository.settings.value.androidCallIntegration) {
                             telecomHelper.reportIncomingCall(event.remoteUri, event.displayName)
@@ -173,6 +176,13 @@ class SoftphoneApp : Application() {
                     is CallEvent.CallEnded -> {
                         SoftphoneConnection.onCallEnded(event.wasMissed)
                         SipForegroundService.stopService(this@SoftphoneApp)
+                        // The company's call report (delivery riders only), whatever the
+                        // rider's own history setting
+                        callReporter.onCallEnded(
+                            event,
+                            event.displayName.takeIf { it.isNotBlank() && !it.startsWith("sip:") }
+                                ?: contactsRepository.findContactName(event.remoteUri).orEmpty()
+                        )
                         if (settingsRepository.settings.value.recordCallHistory) {
                             val callType = when {
                                 event.wasMissed -> CallType.MISSED

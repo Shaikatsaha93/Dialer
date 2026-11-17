@@ -87,6 +87,41 @@ sealed class CallEvent {
         val displayName: String,
         val durationSeconds: Long,
         val wasMissed: Boolean,
-        val isIncoming: Boolean = false
+        val isIncoming: Boolean = false,
+        /** The call was answered (talk time started). */
+        val answered: Boolean = durationSeconds > 0,
+        /** SIP response code of a failed call (486 busy, 480 unavailable…), 0 if none. */
+        val sipCode: Int = 0,
+        /** Hung up on this phone: an outgoing call cancelled, or an incoming call declined. */
+        val endedLocally: Boolean = false
     ) : CallEvent()
+}
+
+/** How a call ended, as shown in the company's call report. */
+enum class CallResult(val key: String) {
+    ANSWERED("answered"),
+    NO_ANSWER("no_answer"),
+    BUSY("busy"),
+    DECLINED("declined"),
+    CANCELLED("cancelled"),
+    MISSED("missed"),
+    FAILED("failed")
+}
+
+val CallEvent.CallEnded.result: CallResult
+    get() = when {
+        answered -> CallResult.ANSWERED
+        isIncoming -> if (endedLocally) CallResult.DECLINED else CallResult.MISSED
+        endedLocally || sipCode == 487 -> CallResult.CANCELLED
+        sipCode == 486 || sipCode == 600 -> CallResult.BUSY
+        sipCode == 603 -> CallResult.DECLINED
+        sipCode == 408 || sipCode == 480 -> CallResult.NO_ANSWER
+        else -> CallResult.FAILED
+    }
+
+/** Emergency numbers are never held back (e.g. by "calls only on duty"). */
+fun isEmergencyNumber(target: String): Boolean {
+    val user = target.removePrefix("sip:").removePrefix("sips:").substringBefore("@").substringBefore(";")
+    if (user.any { it.isLetter() }) return false
+    return user.filter { it.isDigit() } in setOf("999", "112", "911")
 }

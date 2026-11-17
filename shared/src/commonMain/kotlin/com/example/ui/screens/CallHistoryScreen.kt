@@ -199,8 +199,7 @@ fun CallHistoryScreen(
                     CallLogItem(
                         entry = displayEntry,
                         onCallBack = { uri ->
-                            viewModel.initiateCall(uri)
-                            onNavigateToActiveCall()
+                            if (viewModel.initiateCall(uri)) onNavigateToActiveCall()
                         },
                         onDelete = { viewModel.deleteCallLog(log) }
                     )

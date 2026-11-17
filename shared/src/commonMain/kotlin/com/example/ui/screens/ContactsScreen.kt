@@ -277,8 +277,7 @@ fun ContactsScreen(
                     ContactItem(
                         contact = contact,
                         onCallClick = { number ->
-                            viewModel.initiateCall(number)
-                            onNavigateToActiveCall()
+                            if (viewModel.initiateCall(number)) onNavigateToActiveCall()
                         }
                     )
                 }

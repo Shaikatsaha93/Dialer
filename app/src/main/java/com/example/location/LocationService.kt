@@ -111,6 +111,7 @@ class LocationService : Service() {
         val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
         val now = System.currentTimeMillis()
         val db = FirebaseDatabase.getInstance()
+        duty.lastFix = location
 
         val moved = lastSent?.distanceTo(location) ?: Float.MAX_VALUE
         Log.d(TAG, "Fix ±${location.accuracy.toInt()} m, moved ${if (lastSent == null) "-" else moved.toInt()} m")
