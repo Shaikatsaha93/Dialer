@@ -166,6 +166,27 @@ class FirebaseRest(
         send(authorized(token, "$baseUrl/$path").DELETE())
     }
 
+    // ---- Realtime Database ----
+
+    private val databaseUrl = "https://$projectId.firebaseio.com"
+
+    /** Sets the number at [path] (e.g. members/{company}/{uid}). */
+    suspend fun putValue(token: String, path: String, value: Long) {
+        send(
+            HttpRequest.newBuilder(URI(databaseUrl(token, path))).timeout(Duration.ofSeconds(20))
+                .header("Content-Type", "application/json")
+                .PUT(HttpRequest.BodyPublishers.ofString(value.toString()))
+        )
+    }
+
+    suspend fun removeValue(token: String, path: String) {
+        send(HttpRequest.newBuilder(URI(databaseUrl(token, path))).timeout(Duration.ofSeconds(20)).DELETE())
+    }
+
+    // The Realtime Database REST API takes the Firebase ID token as ?auth=
+    private fun databaseUrl(token: String, path: String) =
+        "$databaseUrl/$path.json?auth=" + URLEncoder.encode(token, "UTF-8")
+
     // ---- Plumbing ----
 
     private fun authorized(token: String, url: String) =

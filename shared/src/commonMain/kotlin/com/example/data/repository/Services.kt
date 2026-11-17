@@ -79,7 +79,9 @@ data class DeviceRecord(
     val expiresAt: Long?,
     val createdAt: Long?,
     val approvedAt: Long?,
-    val hasSipAccount: Boolean
+    val hasSipAccount: Boolean,
+    /** The delivery company's code when the rider joined with one, otherwise null. */
+    val companyId: String? = null
 ) {
     val status: DeviceStatus
         get() = when {

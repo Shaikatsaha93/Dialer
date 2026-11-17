@@ -10,6 +10,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.MainActivity
 import com.google.firebase.Timestamp
+import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
@@ -69,13 +70,15 @@ class AdminManager(private val context: Context) : AdminService {
 
     /** Approves for [days] days from today. */
     override fun approve(id: String, days: Int) {
+        val expires = daysFrom(Date(), days)
         update(
             id,
             mapOf(
                 "approved" to true,
-                "expiresAt" to Timestamp(daysFrom(Date(), days)),
+                "expiresAt" to Timestamp(expires),
                 "approvedAt" to FieldValue.serverTimestamp()
-            )
+            ),
+            memberUntil = expires.time
         )
     }
 
@@ -83,13 +86,15 @@ class AdminManager(private val context: Context) : AdminService {
     override fun extend(record: DeviceRecord, days: Int) {
         val now = Date()
         val base = record.expiresAt?.let { Date(it) }?.takeIf { it.after(now) } ?: now
+        val expires = daysFrom(base, days)
         update(
             record.id,
             mapOf(
                 "approved" to true,
-                "expiresAt" to Timestamp(daysFrom(base, days)),
+                "expiresAt" to Timestamp(expires),
                 "approvedAt" to (record.approvedAt?.let { Timestamp(Date(it)) } ?: FieldValue.serverTimestamp())
-            )
+            ),
+            memberUntil = expires.time
         )
     }
 
@@ -102,23 +107,48 @@ class AdminManager(private val context: Context) : AdminService {
                 "approved" to true,
                 "expiresAt" to Timestamp(farFuture),
                 "approvedAt" to FieldValue.serverTimestamp()
-            )
+            ),
+            memberUntil = farFuture.time
         )
     }
 
-    override fun block(id: String) = update(id, mapOf("approved" to false))
+    override fun block(id: String) = update(id, mapOf("approved" to false), memberUntil = null)
 
     override fun delete(id: String) {
+        companyOf(id)?.let { syncMember(it, id, null) }
         firestore.collection(LicenseManager.COLLECTION).document(id).delete()
             .addOnFailureListener { e -> _error.value = "Delete failed: ${e.localizedMessage}" }
     }
 
-    private fun update(id: String, data: Map<String, Any>) {
+    private fun update(id: String, data: Map<String, Any>, memberUntil: Long?) {
+        val companyId = companyOf(id)
         firestore.collection(LicenseManager.COLLECTION).document(id).update(data)
+            .addOnSuccessListener { if (companyId != null) syncMember(companyId, id, memberUntil) }
             .addOnFailureListener { e ->
                 Log.w(TAG, "Update failed: ${e.message}")
                 _error.value = "Update failed: ${e.localizedMessage}"
             }
+    }
+
+    private fun companyOf(id: String) = _devices.value.firstOrNull { it.id == id }?.companyId
+
+    /**
+     * A delivery company's rider may share its location while members/{company}/{uid} holds a
+     * future time (database.rules.json). Approving sets it; blocking and deleting remove it and the
+     * rider's last position.
+     */
+    private fun syncMember(companyId: String, id: String, until: Long?) {
+        val db = FirebaseDatabase.getInstance()
+        val onFailure = { e: Exception ->
+            Log.w(TAG, "Location access not updated: ${e.message}")
+            _error.value = "Location access not updated: ${e.localizedMessage}"
+        }
+        if (until != null) {
+            db.getReference("members/$companyId/$id").setValue(until).addOnFailureListener(onFailure)
+        } else {
+            db.getReference("members/$companyId/$id").removeValue().addOnFailureListener(onFailure)
+            db.getReference("live/$companyId/$id").removeValue().addOnFailureListener(onFailure)
+        }
     }
 
     private fun daysFrom(base: Date, days: Int) = Date(base.time + TimeUnit.DAYS.toMillis(days.toLong()))
@@ -132,7 +162,8 @@ class AdminManager(private val context: Context) : AdminService {
         expiresAt = getTimestamp("expiresAt")?.toDate()?.time,
         createdAt = getTimestamp("createdAt")?.toDate()?.time,
         approvedAt = getTimestamp("approvedAt")?.toDate()?.time,
-        hasSipAccount = contains("sipUsername")
+        hasSipAccount = contains("sipUsername"),
+        companyId = getString("companyId")?.takeIf { it.isNotBlank() }
     )
 
     /** One notification per new pending request (remembered across restarts). */

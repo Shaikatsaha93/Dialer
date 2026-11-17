@@ -193,7 +193,9 @@ private fun DeviceCard(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Text(
-            text = "Device ID: ${record.id.take(8)}" + if (record.hasSipAccount) " · SIP account from admin" else "",
+            text = "Device ID: ${record.id.take(8)}" +
+                (record.companyId?.let { " · Company $it" } ?: "") +
+                if (record.hasSipAccount) " · SIP account from admin" else "",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

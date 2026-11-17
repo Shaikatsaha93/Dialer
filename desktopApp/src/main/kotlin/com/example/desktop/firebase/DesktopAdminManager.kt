@@ -67,7 +67,8 @@ class DesktopAdminManager(
                     expiresAt = (f["expiresAt"] as? Instant)?.toEpochMilli(),
                     createdAt = (f["createdAt"] as? Instant)?.toEpochMilli(),
                     approvedAt = (f["approvedAt"] as? Instant)?.toEpochMilli(),
-                    hasSipAccount = !(f["sipUsername"] as? String).isNullOrBlank()
+                    hasSipAccount = !(f["sipUsername"] as? String).isNullOrBlank(),
+                    companyId = (f["companyId"] as? String)?.takeIf { it.isNotBlank() }
                 )
             }.sortedWith(
                 compareBy<DeviceRecord> { it.status != DeviceStatus.PENDING }.thenByDescending { it.createdAt ?: 0L }
@@ -80,32 +81,43 @@ class DesktopAdminManager(
         }
     }
 
-    override fun approve(id: String, days: Int) = update(
-        id,
-        mapOf("approved" to true, "expiresAt" to Instant.ofEpochMilli(System.currentTimeMillis() + days * AdminService.DAY_MILLIS)),
-        serverTime = listOf("approvedAt")
-    )
+    override fun approve(id: String, days: Int) {
+        val expires = System.currentTimeMillis() + days * AdminService.DAY_MILLIS
+        update(
+            id,
+            mapOf("approved" to true, "expiresAt" to Instant.ofEpochMilli(expires)),
+            serverTime = listOf("approvedAt"),
+            memberUntil = expires
+        )
+    }
 
     override fun extend(record: DeviceRecord, days: Int) {
         val now = System.currentTimeMillis()
         val base = record.expiresAt?.takeIf { it > now } ?: now
-        val fields = mutableMapOf<String, Any?>("approved" to true, "expiresAt" to Instant.ofEpochMilli(base + days * AdminService.DAY_MILLIS))
+        val expires = base + days * AdminService.DAY_MILLIS
+        val fields = mutableMapOf<String, Any?>("approved" to true, "expiresAt" to Instant.ofEpochMilli(expires))
         record.approvedAt?.let { fields["approvedAt"] = Instant.ofEpochMilli(it) }
-        update(record.id, fields, serverTime = if (record.approvedAt == null) listOf("approvedAt") else emptyList())
+        update(record.id, fields, serverTime = if (record.approvedAt == null) listOf("approvedAt") else emptyList(), memberUntil = expires)
     }
 
-    override fun approveWithoutLimit(id: String) = update(
-        id,
-        mapOf("approved" to true, "expiresAt" to LocalDate.of(2099, 12, 31).atStartOfDay().toInstant(ZoneOffset.UTC)),
-        serverTime = listOf("approvedAt")
-    )
+    override fun approveWithoutLimit(id: String) {
+        val expires = LocalDate.of(2099, 12, 31).atStartOfDay().toInstant(ZoneOffset.UTC)
+        update(
+            id,
+            mapOf("approved" to true, "expiresAt" to expires),
+            serverTime = listOf("approvedAt"),
+            memberUntil = expires.toEpochMilli()
+        )
+    }
 
-    override fun block(id: String) = update(id, mapOf("approved" to false))
+    override fun block(id: String) = update(id, mapOf("approved" to false), memberUntil = null)
 
     override fun delete(id: String) {
+        val companyId = companyOf(id)
         scope.launch {
             val token = license.adminToken() ?: return@launch
             try {
+                if (companyId != null) syncMember(token, companyId, id, null)
                 firebase.deleteDocument(token, "${LicenseService.COLLECTION}/$id")
                 reload()
             } catch (e: Exception) {
@@ -114,7 +126,29 @@ class DesktopAdminManager(
         }
     }
 
-    private fun update(id: String, fields: Map<String, Any?>, serverTime: List<String> = emptyList()) {
+    private fun companyOf(id: String) = _devices.value.firstOrNull { it.id == id }?.companyId
+
+    /**
+     * A delivery company's rider may share its location while members/{company}/{uid} holds a
+     * future time (database.rules.json). Approving sets it; blocking and deleting remove it and the
+     * rider's last position.
+     */
+    private suspend fun syncMember(token: String, companyId: String, id: String, until: Long?) {
+        if (until != null) {
+            firebase.putValue(token, "members/$companyId/$id", until)
+        } else {
+            firebase.removeValue(token, "members/$companyId/$id")
+            firebase.removeValue(token, "live/$companyId/$id")
+        }
+    }
+
+    private fun update(
+        id: String,
+        fields: Map<String, Any?>,
+        serverTime: List<String> = emptyList(),
+        memberUntil: Long?
+    ) {
+        val companyId = companyOf(id)
         scope.launch {
             val token = license.adminToken() ?: return@launch
             try {
@@ -125,6 +159,7 @@ class DesktopAdminManager(
                     serverTimeFields = serverTime,
                     mustExist = true
                 )
+                if (companyId != null) syncMember(token, companyId, id, memberUntil)
                 reload()
             } catch (e: Exception) {
                 _error.value = "Update failed: ${e.message}"
