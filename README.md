@@ -309,7 +309,7 @@ Delivery companies use the app for their riders and follow them on a live map. E
 | Who | Where | What |
 |---|---|---|
 | Main admin (`ADMIN_EMAIL`) | Dashboard → **Companies** | Creates a company (its **code**, e.g. `PATHAO7`, name and subscription) and the company admin's email and password. Extends a company's subscription. |
-| Company admin | Dashboard → **Riders** and **Map** | Approves, renews, blocks and deletes the company's riders, sets their SIP accounts, and sees them live on the map with today's route. |
+| Company admin | Dashboard → **Riders** and **Map** | Approves, renews, blocks and deletes the company's riders, sets their SIP accounts, sees them live on the map, and gets each rider's route reports (see below). |
 | Rider | The Android app | Types the company code in the access request. After approval, switches **On duty** on the dialer screen to share the location, and off after work. |
 
 The dashboard is a web page: **https://shaikatsaha93.github.io/Dialer/** (published from [`dashboard/`](dashboard/) by `.github/workflows/dashboard.yml`). It works on any computer or phone browser; the map is OpenStreetMap, no API key needed.
@@ -323,10 +323,22 @@ The dashboard is a web page: **https://shaikatsaha93.github.io/Dialer/** (publis
 - After a reboot, sharing resumes the next time the rider opens Dialer (Android only lets a location service start from the open app).
 - OPPO, Xiaomi, Vivo and similar phones can stop apps in the background: set Dialer's battery usage to **Unrestricted**.
 
+### Route reports: where a rider was, and when
+
+On the **Map**, click a rider (or **Show route** in its popup) and pick a day in **Route of** (the last 30 days are kept):
+
+- **Summary**: distance, first and last time, number of stops and time stopped, top speed, and the time without any location (off duty, phone off or no signal; drawn as a dashed grey line).
+- **Time slider**: drag it to see where the rider was at any moment (red dot on the map, with time, speed and a Google Maps link). Hovering a point of the route shows its time; clicking it moves the slider there.
+- **Stops**: every place the rider stayed within 100 m for 5 minutes or more, with the time, duration and street address (from OpenStreetMap). Click a stop to go there.
+- **Report → Download CSV** (opens in Excel): this day, or the 7 or 30 days up to it. One line per day (distance, start, end, stops, time stopped, time without location, top speed), then the timeline: each stop with its address, each moving point with time and speed, and each gap.
+
+The phone adds a route point every 30 m moved, or every 5 minutes while standing.
+
 ### Where the data is
 
 - Firestore `companies/{code}`: name, `adminUids`, `adminEmails`, `expiresAt`. Rider records stay in `devices/{uid}`, with `companyId` = the code.
 - Realtime Database (free for frequent small writes): `live/{code}/{uid}` (latest position), `tracks/{code}/{uid}/{yyyy-MM-dd}` (the day's route, kept 30 days), and two lists the dashboard keeps in step with Firestore because Realtime Database rules cannot read Firestore: `companyAdmins/{code}/{uid}` and `members/{code}/{uid}` (until when the rider may share).
+- Approving, renewing, blocking or deleting a company's rider (in the dashboard, or in the app's Admin tab) also updates `members/{code}/{uid}`; without it the rider's phone may not write its location.
 - Who may read and write what is enforced by [`firestore.rules`](firestore.rules) and [`database.rules.json`](database.rules.json), not by the apps.
 
 ### One-time setup

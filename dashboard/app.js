@@ -256,7 +256,6 @@ document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () 
 let map = null;
 const markers = new Map();
 let firstFit = true;
-let routeLine = null;
 let routeRef = null;
 
 function ensureMap() {
@@ -284,7 +283,7 @@ function popupContent(uid, p) {
     speed ? el('div', {}, 'Speed: ', speed) : null,
     battery ? el('div', {}, 'Battery: ', battery) : null,
     typeof p.accuracy === 'number' ? el('div', { class: 'muted' }, `Accuracy ±${Math.round(p.accuracy)} m`) : null,
-    el('button', { class: 'link', onclick: () => selectRider(uid) }, "Show today's route")
+    el('button', { class: 'link', onclick: () => selectRider(uid) }, "Show route")
   );
 }
 
@@ -372,10 +371,85 @@ function selectRider(uid) {
   markers.get(uid)?.openPopup();
   $('route-box').classList.remove('hidden');
   $('route-title').textContent = riderName(uid, p);
+  $('report-msg').textContent = '';
   if (!$('route-day').value) $('route-day').value = dayKey(new Date());
   showRoute();
   pruneOldDays(uid);
   renderMap();
+}
+
+// ---------- route: where a rider was, when ----------
+
+/** A stop: the rider stayed within STOP_RADIUS_M for at least STOP_MIN_MS */
+const STOP_RADIUS_M = 100;
+const STOP_MIN_MS = 5 * 60 * 1000;
+/**
+ * The phone adds a route point at least every 5 minutes while on duty, so a longer silence means
+ * it was off duty, switched off or without signal. Such a stretch is drawn dashed.
+ */
+const GAP_MS = 15 * 60 * 1000;
+/** GPS glitches report impossible speeds; they are left out of the top speed */
+const MAX_REAL_SPEED_KMH = 200;
+
+let routeLayer = null;
+let routeDots = null;
+let playhead = null;
+let route = null;          // { points, stops, gaps, km, topSpeed } of the shown day
+let followEnd = true;      // the slider stays on the newest point while today's route grows
+
+function timeText(ms) {
+  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function durationText(ms) {
+  const min = Math.round(ms / 60000);
+  if (min < 60) return `${min} min`;
+  return `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, '0')} min`;
+}
+
+function kmh(pt) {
+  return typeof pt.speed === 'number' ? Math.round(pt.speed * 3.6) : null;
+}
+
+function metres(a, b) {
+  return L.latLng(a.lat, a.lng).distanceTo(L.latLng(b.lat, b.lng));
+}
+
+function trackPoints(val) {
+  return Object.values(val || {})
+    .filter((pt) => typeof pt.lat === 'number' && typeof pt.lng === 'number' && typeof pt.t === 'number')
+    .sort((a, b) => a.t - b.t);
+}
+
+/** Stops (stayed within STOP_RADIUS_M for STOP_MIN_MS or longer) and gaps (no point for GAP_MS) */
+function analyseRoute(points) {
+  const stops = [];
+  for (let i = 0; i < points.length;) {
+    let j = i;
+    while (j + 1 < points.length && metres(points[i], points[j + 1]) <= STOP_RADIUS_M) j++;
+    if (points[j].t - points[i].t >= STOP_MIN_MS) {
+      const slice = points.slice(i, j + 1);
+      stops.push({
+        first: i, last: j, from: points[i].t, to: points[j].t,
+        lat: slice.reduce((s, pt) => s + pt.lat, 0) / slice.length,
+        lng: slice.reduce((s, pt) => s + pt.lng, 0) / slice.length
+      });
+      i = j + 1;
+    } else {
+      i++;
+    }
+  }
+  const gaps = [];
+  let km = 0;
+  let topSpeed = 0;
+  for (let i = 0; i < points.length; i++) {
+    const v = kmh(points[i]);
+    if (v !== null && v <= MAX_REAL_SPEED_KMH) topSpeed = Math.max(topSpeed, v);
+    if (i === 0) continue;
+    km += metres(points[i - 1], points[i]) / 1000;
+    if (points[i].t - points[i - 1].t >= GAP_MS) gaps.push({ after: i - 1, from: points[i - 1].t, to: points[i].t });
+  }
+  return { points, stops, gaps, km, topSpeed };
 }
 
 function showRoute() {
@@ -383,34 +457,296 @@ function showRoute() {
   const uid = state.selectedRider;
   const day = $('route-day').value;
   if (!uid || !day) return;
+  followEnd = true;
+  $('route-info').textContent = 'Loading…';
   routeRef = ref(db, `tracks/${state.company}/${uid}/${day}`);
   onValue(routeRef, (snap) => {
-    const points = Object.values(snap.val() || {})
-      .filter((pt) => typeof pt.lat === 'number' && typeof pt.lng === 'number')
-      .sort((a, b) => a.t - b.t);
-    if (routeLine) routeLine.remove();
-    routeLine = null;
-    if (points.length < 2) {
-      $('route-info').textContent = points.length ? 'Only one point on this day.' : 'No route on this day.';
-      return;
-    }
-    routeLine = L.polyline(points.map((pt) => [pt.lat, pt.lng]), { color: '#007aff', weight: 4, opacity: 0.8 }).addTo(map);
-    let km = 0;
-    for (let i = 1; i < points.length; i++) km += map.distance([points[i - 1].lat, points[i - 1].lng], [points[i].lat, points[i].lng]) / 1000;
-    const from = new Date(points[0].t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const to = new Date(points[points.length - 1].t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    $('route-info').textContent = `${km.toFixed(1)} km · ${from}–${to} · ${points.length} points`;
+    const keepIndex = followEnd || !route ? null : +$('route-slider').value;
+    route = analyseRoute(trackPoints(snap.val()));
+    drawRoute(keepIndex);
   }, (err) => { $('route-info').textContent = 'Cannot load the route: ' + err.message; });
+}
+
+function drawRoute(keepIndex) {
+  ensureMap();
+  if (!routeLayer) routeLayer = L.layerGroup().addTo(map);
+  if (!routeDots) routeDots = L.canvas({ padding: 0.5 });
+  routeLayer.clearLayers();
+  playhead = null;
+  const { points, stops, gaps } = route;
+  const empty = points.length === 0;
+  $('route-info').textContent = empty ? 'No route on this day.' : '';
+  $('route-summary').classList.toggle('hidden', empty);
+  $('route-player').classList.toggle('hidden', empty);
+  $('route-stops-wrap').classList.toggle('hidden', stops.length === 0);
+  if (empty) { $('route-stops').replaceChildren(); return; }
+
+  // The line, broken where the phone sent nothing for a while (dashed: not the real path)
+  const gapAfter = new Set(gaps.map((g) => g.after));
+  let run = [points[0]];
+  const flush = () => {
+    if (run.length > 1) L.polyline(run.map((pt) => [pt.lat, pt.lng]), { color: '#007aff', weight: 4, opacity: 0.8 }).addTo(routeLayer);
+  };
+  for (let i = 1; i < points.length; i++) {
+    if (gapAfter.has(i - 1)) {
+      flush();
+      L.polyline([[points[i - 1].lat, points[i - 1].lng], [points[i].lat, points[i].lng]],
+        { color: '#9ca3af', weight: 3, dashArray: '6 8' }).addTo(routeLayer);
+      run = [];
+    }
+    run.push(points[i]);
+  }
+  flush();
+
+  // Every point: hover for its time, click to move the time slider there
+  points.forEach((pt, i) => {
+    L.circleMarker([pt.lat, pt.lng], { renderer: routeDots, radius: 3, color: '#007aff', weight: 1, fillColor: '#fff', fillOpacity: 1 })
+      .bindTooltip(() => pointText(pt), { direction: 'top' })
+      .on('click', () => { followEnd = i === points.length - 1; setPlayhead(i, false); })
+      .addTo(routeLayer);
+  });
+
+  // Start, end and numbered stops
+  const pin = (pt, cls, label, tip) => L.marker([pt.lat, pt.lng], {
+    icon: L.divIcon({ className: '', html: `<div class="route-pin ${cls}">${label}</div>`, iconSize: [22, 22], iconAnchor: [11, 11] }),
+    zIndexOffset: 500
+  }).bindTooltip(el('span', {}, tip), { direction: 'top' }).addTo(routeLayer);
+  pin(points[0], 'start', 'S', `Start · ${timeText(points[0].t)}`);
+  if (points.length > 1) pin(points[points.length - 1], 'end', 'E', `Last point · ${timeText(points[points.length - 1].t)}`);
+  stops.forEach((s, n) => pin(s, 'stop', n + 1, `Stop ${n + 1} · ${timeText(s.from)}–${timeText(s.to)} (${durationText(s.to - s.from)})`)
+    .on('click', () => focusStop(n)));
+
+  renderSummary();
+  renderStops();
+  $('route-slider').max = String(points.length - 1);
+  setPlayhead(keepIndex === null ? points.length - 1 : Math.min(keepIndex, points.length - 1), false);
+}
+
+function pointText(pt) {
+  const v = kmh(pt);
+  return `${timeText(pt.t)}${v !== null ? ` · ${v} km/h` : ''}`;
+}
+
+function renderSummary() {
+  const { points, stops, gaps, km, topSpeed } = route;
+  const first = points[0].t;
+  const last = points[points.length - 1].t;
+  const stopped = stops.reduce((s, x) => s + (x.to - x.from), 0);
+  const silent = gaps.reduce((s, g) => s + (g.to - g.from), 0);
+  const stat = (value, label) => el('div', { class: 'stat' }, el('b', {}, value), el('span', {}, label));
+  $('route-summary').replaceChildren(
+    stat(`${km.toFixed(1)} km`, 'distance'),
+    stat(`${timeText(first)}–${timeText(last)}`, durationText(last - first)),
+    stat(String(stops.length), `${stops.length === 1 ? 'stop' : 'stops'} · ${durationText(stopped)}`),
+    stat(topSpeed ? `${topSpeed} km/h` : '–', 'top speed'),
+    silent ? stat(durationText(silent), 'no location (off duty or no signal)') : null
+  );
+}
+
+function renderStops() {
+  $('route-stops').replaceChildren(...route.stops.map((s, n) => {
+    const address = el('div', { class: 'address muted' }, '…');
+    lookupAddress(s.lat, s.lng).then((text) => { address.textContent = text || `${s.lat.toFixed(5)}, ${s.lng.toFixed(5)}`; });
+    return el('li', { onclick: () => focusStop(n) },
+      el('div', {}, el('b', {}, `${timeText(s.from)}–${timeText(s.to)}`), ` · ${durationText(s.to - s.from)}`),
+      address);
+  }));
+}
+
+function focusStop(n) {
+  const s = route.stops[n];
+  followEnd = false;
+  map.setView([s.lat, s.lng], Math.max(map.getZoom(), 16));
+  setPlayhead(s.first, false);
+}
+
+/** Moves the time slider and the red marker on the map to point [i] */
+function setPlayhead(i, pan) {
+  const pt = route?.points[i];
+  if (!pt) return;
+  $('route-slider').value = String(i);
+  if (!playhead) {
+    // Its own pane above the pins, so it stays visible on a stop
+    if (!map.getPane('playhead')) map.createPane('playhead').style.zIndex = 640;
+    playhead = L.circleMarker([pt.lat, pt.lng], { pane: 'playhead', radius: 9, color: '#fff', weight: 3, fillColor: '#ff3b30', fillOpacity: 1 })
+      .addTo(routeLayer);
+  }
+  playhead.setLatLng([pt.lat, pt.lng]);
+  if (pan && !map.getBounds().pad(-0.1).contains(playhead.getLatLng())) map.panTo(playhead.getLatLng());
+  const stopIndex = route.stops.findIndex((s) => i >= s.first && i <= s.last);
+  const stop = route.stops[stopIndex];
+  $('route-at').replaceChildren(
+    el('b', {}, new Date(pt.t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })),
+    stop
+      ? ` · Stop ${stopIndex + 1} (${timeText(stop.from)}–${timeText(stop.to)})`
+      : (kmh(pt) !== null ? ` · ${kmh(pt)} km/h` : ''),
+    el('div', {}, el('a', { href: mapsLink(pt.lat, pt.lng), target: '_blank', rel: 'noopener' }, `${pt.lat.toFixed(5)}, ${pt.lng.toFixed(5)}`))
+  );
+}
+
+$('route-slider').addEventListener('input', () => {
+  if (!route) return;
+  const i = +$('route-slider').value;
+  followEnd = i === route.points.length - 1;
+  setPlayhead(i, true);
+});
+
+function mapsLink(lat, lng) {
+  return `https://www.google.com/maps?q=${lat.toFixed(6)},${lng.toFixed(6)}`;
 }
 
 function clearRoute(hideBox = true) {
   if (routeRef) { off(routeRef); routeRef = null; }
-  if (routeLine) { routeLine.remove(); routeLine = null; }
+  if (routeLayer) routeLayer.clearLayers();
+  playhead = null;
+  route = null;
+  $('route-summary').classList.add('hidden');
+  $('route-player').classList.add('hidden');
+  $('route-stops-wrap').classList.add('hidden');
+  $('route-info').textContent = '';
   if (hideBox) $('route-box').classList.add('hidden');
 }
 
 $('route-day').addEventListener('change', showRoute);
 $('route-clear').addEventListener('click', () => { state.selectedRider = null; clearRoute(); renderMap(); });
+
+// ---------- addresses ----------
+
+// Street addresses of stops from OpenStreetMap's Nominatim. Its usage policy allows at most one
+// request per second, so lookups are queued and remembered in this browser.
+const addressCache = new Map();
+let addressQueue = Promise.resolve();
+
+function lookupAddress(lat, lng) {
+  const key = `${lat.toFixed(4)},${lng.toFixed(4)}`; // about 10 m
+  if (addressCache.has(key)) return addressCache.get(key);
+  const saved = localStorageGet('addr.' + key);
+  if (saved) {
+    const p = Promise.resolve(saved);
+    addressCache.set(key, p);
+    return p;
+  }
+  const p = addressQueue.then(async () => {
+    try {
+      const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&lat=${lat.toFixed(6)}&lon=${lng.toFixed(6)}`;
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      if (!res.ok) return '';
+      const text = addressText(await res.json());
+      if (text) localStorageSet('addr.' + key, text);
+      return text;
+    } catch {
+      return '';
+    } finally {
+      await new Promise((r) => setTimeout(r, 1100));
+    }
+  });
+  addressQueue = p.catch(() => {});
+  p.then((text) => { if (!text) addressCache.delete(key); }); // failed: try again next time
+  addressCache.set(key, p);
+  return p;
+}
+
+function addressText(data) {
+  const a = data?.address || {};
+  const street = a.road ? (a.house_number ? `${a.house_number} ${a.road}` : a.road) : null;
+  const parts = [data?.name || null, street, a.neighbourhood || a.suburb || a.quarter || null,
+    a.city || a.town || a.village || a.county || null];
+  const unique = parts.filter((x, i) => x && parts.indexOf(x) === i);
+  if (unique.length) return unique.join(', ');
+  return (data?.display_name || '').split(', ').slice(0, 3).join(', ');
+}
+
+// ---------- report (CSV for Excel) ----------
+
+function parseDay(key) {
+  const [y, m, d] = key.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
+/** A CSV cell. Text typed by riders can start with = + - @, which Excel would run as a formula. */
+function csvCell(v) {
+  let s = v === null || v === undefined ? '' : String(v);
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+async function downloadReport() {
+  const uid = state.selectedRider;
+  const endKey = $('route-day').value;
+  if (!uid || !endKey) return;
+  const button = $('report-download');
+  const msg = $('report-msg');
+  const count = +$('report-range').value;
+  const days = [];
+  for (let k = count - 1; k >= 0; k--) {
+    const d = parseDay(endKey);
+    d.setDate(d.getDate() - k);
+    days.push(dayKey(d));
+  }
+  button.disabled = true;
+  try {
+    msg.textContent = 'Loading the route…';
+    const loaded = [];
+    for (const day of days) {
+      const snap = await get(ref(db, `tracks/${state.company}/${uid}/${day}`));
+      const points = trackPoints(snap.val());
+      if (points.length) loaded.push({ day, ...analyseRoute(points) });
+    }
+    if (!loaded.length) { msg.textContent = 'No route in this period.'; return; }
+
+    const allStops = loaded.flatMap((d) => d.stops);
+    for (let n = 0; n < allStops.length; n++) {
+      msg.textContent = `Looking up addresses ${n + 1} of ${allStops.length}…`;
+      allStops[n].address = await lookupAddress(allStops[n].lat, allStops[n].lng);
+    }
+
+    const r = state.riders.get(uid);
+    const name = riderName(uid, state.live[uid]);
+    const lines = [
+      ['Rider', name], ['Phone', r?.phone || state.live[uid]?.phone || ''], ['Company', state.company],
+      ['Period', days.length > 1 ? `${days[0]} to ${days[days.length - 1]}` : days[0]], [],
+      ['Date', 'Distance (km)', 'Start', 'End', 'Stops', 'Stopped (min)', 'No location (min)', 'Top speed (km/h)']
+    ];
+    for (const d of loaded) {
+      lines.push([d.day, d.km.toFixed(1), timeText(d.points[0].t), timeText(d.points[d.points.length - 1].t), d.stops.length,
+        Math.round(d.stops.reduce((s, x) => s + x.to - x.from, 0) / 60000),
+        Math.round(d.gaps.reduce((s, g) => s + g.to - g.from, 0) / 60000), d.topSpeed || '']);
+    }
+    lines.push([], ['Date', 'From', 'To', 'Minutes', 'What', 'Speed (km/h)', 'Latitude', 'Longitude', 'Address', 'Map']);
+    for (const d of loaded) {
+      const stopAt = new Map(d.stops.map((s, n) => [s.first, { ...s, n }]));
+      const gapAfter = new Map(d.gaps.map((g) => [g.after, g]));
+      for (let i = 0; i < d.points.length; i++) {
+        const s = stopAt.get(i);
+        if (s) {
+          lines.push([d.day, timeText(s.from), timeText(s.to), Math.round((s.to - s.from) / 60000), `Stop ${s.n + 1}`, '',
+            s.lat.toFixed(6), s.lng.toFixed(6), s.address || '', mapsLink(s.lat, s.lng)]);
+          i = s.last;
+        } else {
+          const pt = d.points[i];
+          lines.push([d.day, timeText(pt.t), '', '', 'Moving', kmh(pt) ?? '', pt.lat.toFixed(6), pt.lng.toFixed(6), '', mapsLink(pt.lat, pt.lng)]);
+        }
+        const g = gapAfter.get(i);
+        if (g) lines.push([d.day, timeText(g.from), timeText(g.to), Math.round((g.to - g.from) / 60000), 'No location (off duty or no signal)']);
+      }
+    }
+    // BOM so Excel reads Bangla names and addresses as UTF-8
+    const csv = '﻿' + lines.map((row) => row.map(csvCell).join(',')).join('\r\n');
+    const file = `route_${name.replace(/[^\p{L}\p{N}]+/gu, '_').replace(/^_+|_+$/g, '') || 'rider'}_${days[0]}${days.length > 1 ? '_to_' + days[days.length - 1] : ''}.csv`;
+    const link = el('a', { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' })), download: file });
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(link.href), 10000);
+    msg.textContent = `Downloaded ${file}`;
+  } catch (err) {
+    msg.textContent = 'Cannot make the report: ' + err.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+$('report-download').addEventListener('click', downloadReport);
 
 /** Deletes the rider's routes older than KEEP_DAYS (no server code runs this otherwise) */
 async function pruneOldDays(uid) {

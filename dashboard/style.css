@@ -100,3 +100,22 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
   .sidebar { width: 100%; height: 40%; border-right: none; border-top: 1px solid var(--line); }
   .user .muted { display: none; }
 }
+
+/* Route report */
+.route-box { overflow: auto; max-height: 70%; flex: none; }
+.section-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; color: var(--muted); margin-top: 6px; }
+.summary { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.stat { background: var(--bg); border-radius: 8px; padding: 6px 8px; display: flex; flex-direction: column; }
+.stat b { font-size: 15px; }
+.stat span { font-size: 11px; color: var(--muted); }
+.player input[type=range] { width: 100%; padding: 0; border: none; accent-color: var(--primary); }
+.route-at { font-size: 13px; }
+.stops { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 4px; }
+.stops li { cursor: pointer; padding: 4px 6px; border-radius: 6px; }
+.stops li:hover { background: var(--bg); }
+.stops .address { font-size: 12px; }
+.report { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--line); padding-top: 6px; }
+.route-pin { width: 22px; height: 22px; border-radius: 6px; border: 2px solid #fff; color: #fff; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 3px rgba(0,0,0,.4); }
+.route-pin.start { background: var(--green); border-radius: 50%; }
+.route-pin.end { background: #1c1c1e; border-radius: 50%; }
+.route-pin.stop { background: var(--orange); }

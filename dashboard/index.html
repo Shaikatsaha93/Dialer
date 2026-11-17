@@ -48,10 +48,37 @@
         </div>
         <ul id="rider-list" class="rider-list"></ul>
         <div id="route-box" class="route-box hidden">
-          <div class="route-title" id="route-title"></div>
+          <div class="row space">
+            <div class="route-title" id="route-title"></div>
+            <button id="route-clear" class="link">Hide route</button>
+          </div>
           <label class="inline">Route of <input id="route-day" type="date"></label>
           <p id="route-info" class="muted"></p>
-          <button id="route-clear" class="link">Hide route</button>
+          <div id="route-summary" class="summary hidden"></div>
+
+          <!-- Where the rider was at a given time -->
+          <div id="route-player" class="player hidden">
+            <input id="route-slider" type="range" min="0" max="0" value="0" aria-label="Time on the route">
+            <div id="route-at" class="route-at"></div>
+          </div>
+
+          <div id="route-stops-wrap" class="hidden">
+            <div class="section-title">Stops</div>
+            <ol id="route-stops" class="stops"></ol>
+          </div>
+
+          <div class="report">
+            <div class="section-title">Report</div>
+            <div class="row">
+              <select id="report-range" aria-label="Report period">
+                <option value="1">This day</option>
+                <option value="7">7 days up to this day</option>
+                <option value="30">30 days up to this day</option>
+              </select>
+              <button id="report-download">Download CSV</button>
+            </div>
+            <p id="report-msg" class="muted"></p>
+          </div>
         </div>
       </aside>
       <div id="map" class="map"></div>
