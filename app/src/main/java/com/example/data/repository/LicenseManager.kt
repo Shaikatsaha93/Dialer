@@ -39,7 +39,7 @@ import java.util.concurrent.TimeUnit
  *
  * Optional SIP provisioning: when the approved record has sipUsername, sipPassword and
  * sipDomain (plus optional sipPort, sipDisplayName), that account is saved and made active, and
- * deleted again when access ends.
+ * deleted again when the admin removes those details or access ends.
  */
 class LicenseManager(
     private val context: Context,
@@ -159,6 +159,8 @@ class LicenseManager(
         if (doc.metadata.hasPendingWrites()) return
         if (doc.getBoolean("approved") != true) _rider.value = null
         if (!doc.exists()) {
+            // Deleted by the admin: the SIP account they gave must go too
+            removeProvisionedAccount()
             _state.value = LicenseState.NeedsRequest
             return
         }
@@ -183,6 +185,7 @@ class LicenseManager(
             // Was approved before, now switched off: blocked, not a new request
             onDenied()
         } else {
+            removeProvisionedAccount()
             _state.value = LicenseState.Pending(doc.getString("name").orEmpty())
         }
     }
@@ -265,7 +268,12 @@ class LicenseManager(
         val username = doc.getString("sipUsername")?.trim().orEmpty()
         val password = doc.getString("sipPassword").orEmpty()
         val domain = doc.getString("sipDomain")?.trim().orEmpty()
-        if (username.isEmpty() || password.isEmpty() || domain.isEmpty()) return
+        if (username.isEmpty() || password.isEmpty() || domain.isEmpty()) {
+            // The admin removed (or cleared) the SIP details: remove the account they gave,
+            // which also unregisters it. An account the user added by hand is kept.
+            removeProvisionedAccount()
+            return
+        }
         val port = (doc.get("sipPort") as? Number)?.toInt() ?: 5060
         val displayName = doc.getString("sipDisplayName").orEmpty()
 

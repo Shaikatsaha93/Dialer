@@ -10,7 +10,7 @@ import {
 } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
 import {
   getFirestore, collection, doc, query, where, onSnapshot, getDoc, setDoc, updateDoc,
-  deleteDoc, arrayUnion, Timestamp, serverTimestamp, connectFirestoreEmulator
+  deleteDoc, deleteField, arrayUnion, Timestamp, serverTimestamp, connectFirestoreEmulator
 } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
 import {
   getDatabase, ref, onValue, off, set, remove, get, query as dbQuery, orderByKey, endAt
@@ -1130,25 +1130,36 @@ function editSip(uid, r) {
   $('sip-pass').value = r.sipPassword || '';
   $('sip-domain').value = r.sipDomain || '';
   $('sip-port').value = r.sipPort || 5060;
-  dialog.onclose = async () => {
-    if (dialog.returnValue !== 'save') return;
+  $('sip-msg').textContent = '';
+  // Remove is offered only when the rider has SIP details
+  $('sip-remove').hidden = !(r.sipUsername || r.sipPassword || r.sipDomain);
+  $('sip-form').onsubmit = async (e) => {
+    const action = e.submitter?.value;
+    if (action === 'cancel') return; // the dialog just closes
+    e.preventDefault(); // stays open until the write succeeds
     const user = $('sip-user').value.trim();
     const pass = $('sip-pass').value;
     const domain = $('sip-domain').value.trim();
+    const remove = action === 'remove' || (!user && !pass && !domain);
+    if (!remove && (!user || !pass || !domain)) {
+      $('sip-msg').textContent = 'Fill in username, password and domain, or use Remove.';
+      return;
+    }
+    // Removing deletes the fields: the app then deletes the account from the phone and unregisters it
+    const data = remove
+      ? Object.fromEntries(SIP_FIELDS.map((f) => [f, deleteField()]))
+      : { sipUsername: user, sipPassword: pass, sipDomain: domain, sipPort: Number($('sip-port').value) || 5060, sipDisplayName: r.name || '' };
     try {
-      await updateDoc(doc(fs, 'devices', uid), {
-        sipUsername: user,
-        sipPassword: pass,
-        sipDomain: domain,
-        sipPort: Number($('sip-port').value) || 5060,
-        sipDisplayName: r.name || ''
-      });
+      await updateDoc(doc(fs, 'devices', uid), data);
+      dialog.close();
     } catch (err) {
-      alert('Could not save: ' + err.message);
+      $('sip-msg').textContent = (remove ? 'Could not remove: ' : 'Could not save: ') + err.message;
     }
   };
   dialog.showModal();
 }
+
+const SIP_FIELDS = ['sipUsername', 'sipPassword', 'sipDomain', 'sipPort', 'sipDisplayName'];
 
 // ---------- companies (main admin) ----------
 

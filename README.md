@@ -284,7 +284,9 @@ Everything in the Admin tab can also be done in **Firestore Database → Data �
 | Set or extend the date | `expiresAt`, type **timestamp** |
 | No time limit | `expiresAt` far in the future, e.g. 2099 |
 
-**Give the SIP account from Firebase (optional).** Add these fields to the approved record. The app saves the account, makes it active and registers. It deletes it again when access ends.
+**Give the SIP account from Firebase (optional).** Add these fields to the approved record. The app saves the account, makes it active and registers. It deletes the account (and unregisters it) again when the fields are removed or emptied, when the record is deleted or set back to pending, and when access ends. An account the user added by hand in Settings is not touched.
+
+In the dashboard: **Riders → SIP column → Set up** (or the account) opens the SIP dialog. **Save** needs username, password and domain; **Remove**, or saving with all three empty, deletes the fields.
 
 | Field | Type | Example |
 |---|---|---|

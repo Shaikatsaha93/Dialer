@@ -109,6 +109,8 @@ class DesktopLicenseManager(
             val s = currentSession()
             val doc = firebase.getDocument(s.idToken, "${LicenseService.COLLECTION}/${s.uid}")
             if (doc == null) {
+                // Deleted by the admin: the SIP account they gave must go too
+                removeProvisionedAccount()
                 _state.value = LicenseState.NeedsRequest
                 return
             }
@@ -140,6 +142,7 @@ class DesktopLicenseManager(
         } else if (prefs.getBoolean(KEY_WAS_APPROVED, false)) {
             onDenied()
         } else {
+            removeProvisionedAccount()
             _state.value = LicenseState.Pending(doc["name"] as? String ?: "")
         }
     }
@@ -263,7 +266,12 @@ class DesktopLicenseManager(
         val username = (doc["sipUsername"] as? String)?.trim().orEmpty()
         val password = (doc["sipPassword"] as? String).orEmpty()
         val domain = (doc["sipDomain"] as? String)?.trim().orEmpty()
-        if (username.isEmpty() || password.isEmpty() || domain.isEmpty()) return
+        if (username.isEmpty() || password.isEmpty() || domain.isEmpty()) {
+            // The admin removed (or cleared) the SIP details: remove the account they gave,
+            // which also unregisters it. An account the user added by hand is kept.
+            scope.launch { removeProvisionedAccount() }
+            return
+        }
         val port = (doc["sipPort"] as? Number)?.toInt() ?: 5060
         val displayName = (doc["sipDisplayName"] as? String).orEmpty()
         scope.launch {
