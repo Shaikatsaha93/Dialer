@@ -1131,8 +1131,8 @@ function editSip(uid, r) {
   $('sip-domain').value = r.sipDomain || '';
   $('sip-port').value = r.sipPort || 5060;
   $('sip-msg').textContent = '';
-  // Remove is offered only when the rider has SIP details
-  $('sip-remove').hidden = !(r.sipUsername || r.sipPassword || r.sipDomain);
+  // Remove is offered when the record has any SIP field, even an empty one an older dashboard saved
+  $('sip-remove').hidden = !SIP_FIELDS.some((f) => f in r);
   $('sip-form').onsubmit = async (e) => {
     const action = e.submitter?.value;
     if (action === 'cancel') return; // the dialog just closes
