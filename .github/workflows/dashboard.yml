@@ -13,24 +13,36 @@ on:
 
 permissions:
   contents: read
+  actions: read
   pages: write
   id-token: write
 
+# One deployment at a time; a running one is allowed to finish
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5
         with:
           path: dashboard
+
+  # A separate job, as in GitHub's Pages template: deploying in the same job right after the
+  # upload failed with "No artifacts named github-pages were found" (the upload was not listed
+  # yet), and re-running then failed with two artifacts of that name.
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Wait until the uploaded site is listed
+        run: sleep 20
       - id: deployment
         uses: actions/deploy-pages@v5
